@@ -1,0 +1,315 @@
+---
+# Terraform Runner Bootstrap Playbook
+#
+# Configures the terraform-runner VM — the dedicated machine that runs all
+# Terraform + Ansible provisioning jobs via GitHub Actions.
+#
+# This is the ONLY VM bootstrapped manually. Run it once from your dev machine
+# after creating the VM in Proxmox. After this, all other VMs are provisioned
+# by GitHub Actions running on this machine.
+#
+# Usage (run from the repo root against a fresh Ubuntu 24.04 VM):
+#   ansible-playbook -i "<TERRAFORM_RUNNER_IP>," ansible/infra-runner.yml \
+#     --ask-become-pass \
+#     -e "ansible_user=ubuntu" \
+#     -e "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
+#     -e "runner_label=self-hosted-infra" \
+#     -e "github_actions_runner_url=https://github.com/your-org/your-repo" \
+#     -e "github_actions_runner_token=YOUR_FRESH_TOKEN"
+#
+# After docker phase, log out and back in (or reconnect) before running other phases:
+#   ansible-playbook ... --skip-tags docker
+#
+# Tags: docker | terraform | ansible-install | portainer-agent | runner | node-exporter | alloy
+
+- name: Terraform runner setup
+  hosts: all
+  vars_files:
+    - vars/main.yml
+
+  tasks:
+
+    # =========================================================================
+    # PHASE 1 — Docker (lightweight, for Portainer Agent visibility)
+    # =========================================================================
+
+    - name: "[docker] Install Docker via official install script"
+      shell: curl -fsSL https://get.docker.com | bash
+      become: true
+      args:
+        creates: /usr/bin/docker
+      tags: docker
+
+    - name: "[docker] Add {{ inference_user }} to docker group"
+      user:
+        name: "{{ inference_user }}"
+        groups: docker
+        append: true
+      become: true
+      tags: docker
+
+    - name: "[docker] Reset connection to pick up docker group membership"
+      meta: reset_connection
+      tags: docker
+
+    # =========================================================================
+    # PHASE 2 — Terraform binary
+    # =========================================================================
+
+    - name: "[terraform] Download Terraform {{ terraform_version }}"
+      get_url:
+        url: "https://releases.hashicorp.com/terraform/{{ terraform_version }}/terraform_{{ terraform_version }}_linux_amd64.zip"
+        dest: "/tmp/terraform.zip"
+        mode: "0644"
+      tags: terraform
+
+    - name: "[terraform] Install unzip"
+      apt:
+        name: unzip
+        state: present
+      become: true
+      tags: terraform
+
+    - name: "[terraform] Extract and install Terraform binary"
+      shell: |
+        unzip -o /tmp/terraform.zip -d /tmp/
+        mv /tmp/terraform /usr/local/bin/terraform
+        chmod +x /usr/local/bin/terraform
+        rm /tmp/terraform.zip
+      args:
+        creates: /usr/local/bin/terraform
+      become: true
+      tags: terraform
+
+    - name: "[terraform] Verify Terraform version"
+      command: terraform version
+      register: tf_version
+      changed_when: false
+      tags: terraform
+
+    - name: "[terraform] Show Terraform version"
+      debug:
+        msg: "{{ tf_version.stdout_lines }}"
+      tags: terraform
+
+    - name: "[terraform] Create state directory"
+      file:
+        path: /home/ubuntu/terraform-state
+        state: directory
+        mode: "0750"
+        owner: ubuntu
+        group: ubuntu
+      become: true
+      tags: terraform
+
+    # =========================================================================
+    # PHASE 3 — Ansible (via uv)
+    # =========================================================================
+
+    - name: "[ansible-install] Install uv"
+      shell: curl -LsSf https://astral.sh/uv/install.sh | sh
+      args:
+        creates: "{{ ansible_env.HOME }}/.local/bin/uv"
+      tags: ansible-install
+
+    - name: "[ansible-install] Add uv to PATH in .bashrc"
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        line: 'export PATH="$HOME/.local/bin:$PATH"'
+        state: present
+      tags: ansible-install
+
+    - name: "[ansible-install] Install ansible-core via uv"
+      shell: "{{ ansible_env.HOME }}/.local/bin/uv tool install ansible-core --with ansible"
+      args:
+        creates: "{{ ansible_env.HOME }}/.local/share/uv/tools/ansible-core/bin/ansible"
+      tags: ansible-install
+
+    - name: "[ansible-install] Add uv tools to PATH in .bashrc"
+      lineinfile:
+        path: "{{ ansible_env.HOME }}/.bashrc"
+        line: 'export PATH="$HOME/.local/share/uv/tools/ansible-core/bin:$PATH"'
+        state: present
+      tags: ansible-install
+
+    - name: "[ansible-install] Install community.docker collection"
+      shell: "{{ ansible_env.HOME }}/.local/share/uv/tools/ansible-core/bin/ansible-galaxy collection install community.docker"
+      changed_when: true
+      tags: ansible-install
+
+    - name: "[ansible-install] Install community.general collection"
+      shell: "{{ ansible_env.HOME }}/.local/share/uv/tools/ansible-core/bin/ansible-galaxy collection install community.general"
+      changed_when: true
+      tags: ansible-install
+
+    - name: "[ansible-install] Verify ansible-playbook is available"
+      shell: "{{ ansible_env.HOME }}/.local/share/uv/tools/ansible-core/bin/ansible-playbook --version"
+      register: ansible_ver
+      changed_when: false
+      tags: ansible-install
+
+    - name: "[ansible-install] Show ansible version"
+      debug:
+        msg: "{{ ansible_ver.stdout_lines[0] }}"
+      tags: ansible-install
+
+    # =========================================================================
+    # PHASE 4 — Portainer Agent (for visibility in Portainer Server)
+    # =========================================================================
+
+    - name: "[portainer-agent] Run Portainer Agent container"
+      community.docker.docker_container:
+        name: portainer_agent
+        image: portainer/agent:latest
+        state: started
+        restart_policy: unless-stopped
+        pull: true
+        ports:
+          - "{{ portainer_agent_port }}:9001"
+        volumes:
+          - "/var/run/docker.sock:/var/run/docker.sock"
+          - "/var/lib/docker/volumes:/var/lib/docker/volumes"
+      tags: portainer-agent
+
+    # =========================================================================
+    # PHASE 5 — GitHub Actions Runner (label: self-hosted-infra)
+    # All VM provisioning workflows target this label.
+    # =========================================================================
+
+    - name: "[runner] Fail early if runner URL or token not set"
+      assert:
+        that:
+          - github_actions_runner_url != ""
+          - github_actions_runner_token != ""
+        fail_msg: >
+          Set github_actions_runner_url and github_actions_runner_token before
+          running the runner phase.
+      tags: runner
+
+    - name: "[runner] Create runner directory"
+      file:
+        path: "{{ github_actions_runner_dir }}"
+        state: directory
+        mode: "0755"
+      tags: runner
+
+    - name: "[runner] Download Actions runner tarball"
+      get_url:
+        url: "https://github.com/actions/runner/releases/download/v{{ github_actions_runner_version }}/actions-runner-linux-x64-{{ github_actions_runner_version }}.tar.gz"
+        dest: "/tmp/actions-runner.tar.gz"
+        mode: "0644"
+      tags: runner
+
+    - name: "[runner] Extract Actions runner"
+      unarchive:
+        src: /tmp/actions-runner.tar.gz
+        dest: "{{ github_actions_runner_dir }}"
+        remote_src: true
+        creates: "{{ github_actions_runner_dir }}/config.sh"
+      tags: runner
+
+    - name: "[runner] Remove existing runner config if present"
+      shell: ./config.sh remove --unattended --token {{ github_actions_runner_token }}
+      args:
+        chdir: "{{ github_actions_runner_dir }}"
+      register: runner_remove
+      failed_when: >
+        runner_remove.rc != 0 and
+        'not configured' not in runner_remove.stderr | lower and
+        'no such file' not in runner_remove.stderr | lower
+      changed_when: runner_remove.rc == 0
+      tags: runner
+
+    - name: "[runner] Configure Actions runner"
+      shell: >
+        ./config.sh
+        --url {{ github_actions_runner_url }}
+        --token {{ github_actions_runner_token }}
+        --labels "self-hosted,{{ runner_label }}"
+        --unattended
+      args:
+        chdir: "{{ github_actions_runner_dir }}"
+      tags: runner
+
+    - name: "[runner] Install Actions runner as system service"
+      shell: ./svc.sh install {{ inference_user }}
+      args:
+        chdir: "{{ github_actions_runner_dir }}"
+      become: true
+      tags: runner
+
+    - name: "[runner] Start Actions runner service"
+      shell: ./svc.sh start
+      args:
+        chdir: "{{ github_actions_runner_dir }}"
+      become: true
+      register: runner_start
+      changed_when: "'started' in runner_start.stdout | lower"
+      tags: runner
+
+    - name: "[runner] Verify runner status"
+      shell: ./svc.sh status
+      args:
+        chdir: "{{ github_actions_runner_dir }}"
+      become: true
+      register: runner_status
+      changed_when: false
+      tags: runner
+
+    - name: "[runner] Show runner status"
+      debug:
+        msg: "{{ runner_status.stdout_lines }}"
+      tags: runner
+
+    # =========================================================================
+    # PHASE 6 — Node Exporter
+    # =========================================================================
+
+    - name: "[node-exporter] Run Node Exporter container"
+      community.docker.docker_container:
+        name: node-exporter
+        image: quay.io/prometheus/node-exporter:latest
+        state: started
+        restart_policy: unless-stopped
+        pull: true
+        network_mode: host
+        pid_mode: host
+        volumes:
+          - "/:/host:ro,rslave"
+        command: "--path.rootfs=/host"
+      tags: node-exporter
+
+    # =========================================================================
+    # PHASE 7 — Grafana Alloy (log shipping → Loki)
+    # =========================================================================
+
+    - name: "[alloy] Create Alloy config directory"
+      file:
+        path: "{{ ansible_env.HOME }}/alloy"
+        state: directory
+        mode: "0750"
+      tags: alloy
+
+    - name: "[alloy] Render Alloy config from template"
+      template:
+        src: templates/alloy-config.j2
+        dest: "{{ ansible_env.HOME }}/alloy/config.alloy"
+        mode: "0640"
+      tags: alloy
+
+    - name: "[alloy] Run Grafana Alloy container"
+      community.docker.docker_container:
+        name: alloy
+        image: grafana/alloy:latest
+        state: started
+        restart_policy: unless-stopped
+        pull: true
+        ports:
+          - "12345:12345"
+        volumes:
+          - "{{ ansible_env.HOME }}/alloy/config.alloy:/etc/alloy/config.alloy"
+          - "/var/log:/var/log:ro"
+          - "/run/log/journal:/run/log/journal:ro"
+          - "/var/run/docker.sock:/var/run/docker.sock"
+        command: "run /etc/alloy/config.alloy"
+      tags: alloy

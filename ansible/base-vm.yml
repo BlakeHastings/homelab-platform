@@ -1,0 +1,265 @@
+---
+# Generic Docker VM Setup Playbook
+#
+# Configures a fresh Ubuntu 24.04 VM (provisioned by Terraform) as a Docker host with:
+#   Phase 1 — Docker + NVIDIA Container Toolkit (docker)
+#   Phase 2 — Portainer Server, CE (portainer-server) — one designated mgmt VM only
+#   Phase 3 — Portainer Agent (portainer-agent)
+#   Phase 4 — GitHub Actions runner (runner)
+#   Phase 5 — Node Exporter (node-exporter)
+#   Phase 6 — Grafana Alloy — log shipping to observability-vm (alloy)
+#
+# Usage (GitHub Actions calls this automatically via provision-vm.yml):
+#   ansible-playbook -i "<VM_IP>," ansible/base-vm.yml \
+#     -e "ansible_user=ubuntu" \
+#     -e "ansible_ssh_private_key_file=~/.ssh/deploy_key" \
+#     -e "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
+#     -e "runner_label=self-hosted-service" \
+#     -e "github_actions_runner_url=https://github.com/your-org/your-repo" \
+#     -e "github_actions_runner_token=YOUR_TOKEN" \
+#     -e "observability_server_ip=192.168.1.51" \
+#     -e "install_portainer_server=true"   # mgmt VM only
+#
+# Tags: docker | portainer-server | portainer-agent | runner | node-exporter | alloy
+
+- name: Docker VM setup
+  hosts: all
+  vars_files:
+    - vars/main.yml
+
+  tasks:
+
+    # =========================================================================
+    # PHASE 1 — Docker
+    # =========================================================================
+
+    - name: "[docker] Install Docker via official install script"
+      shell: curl -fsSL https://get.docker.com | bash
+      become: true
+      args:
+        creates: /usr/bin/docker
+      tags: docker
+
+    - name: "[docker] Add {{ inference_user }} to docker group"
+      user:
+        name: "{{ inference_user }}"
+        groups: docker
+        append: true
+      become: true
+      tags: docker
+
+    - name: "[docker] Reset connection to pick up docker group membership"
+      meta: reset_connection
+      tags: docker
+
+    - name: "[docker] Verify Docker is running"
+      command: docker info
+      changed_when: false
+      tags: docker
+
+    # =========================================================================
+    # PHASE 2 — Portainer Server (one designated management VM only)
+    # Run with: -e "install_portainer_server=true"
+    # =========================================================================
+
+    - name: "[portainer-server] Run Portainer Server container"
+      community.docker.docker_container:
+        name: portainer
+        image: portainer/portainer-ce:latest
+        state: started
+        restart_policy: unless-stopped
+        pull: true
+        ports:
+          - "{{ portainer_server_port }}:9443"
+          - "8000:8000"
+        volumes:
+          - "/var/run/docker.sock:/var/run/docker.sock"
+          - "portainer_data:/data"
+      when: install_portainer_server | default(false) | bool
+      tags: portainer-server
+
+    # =========================================================================
+    # PHASE 3 — Portainer Agent
+    # Connects to the Portainer Server on the management VM.
+    # After provisioning, add this VM in Portainer UI:
+    #   Settings → Environments → Add → Docker Standalone → Agent → <VM_IP>:9001
+    # =========================================================================
+
+    - name: "[portainer-agent] Run Portainer Agent container"
+      community.docker.docker_container:
+        name: portainer_agent
+        image: portainer/agent:latest
+        state: started
+        restart_policy: unless-stopped
+        pull: true
+        ports:
+          - "{{ portainer_agent_port }}:9001"
+        volumes:
+          - "/var/run/docker.sock:/var/run/docker.sock"
+          - "/var/lib/docker/volumes:/var/lib/docker/volumes"
+      tags: portainer-agent
+
+    # =========================================================================
+    # PHASE 4 — GitHub Actions Runner
+    # Runner label will be: "self-hosted,<runner_label>"
+    # A fresh registration token is required — expires 1 hour after generation.
+    # =========================================================================
+
+    - name: "[runner] Fail early if runner URL or token not set"
+      assert:
+        that:
+          - github_actions_runner_url != ""
+          - github_actions_runner_token != ""
+        fail_msg: >
+          Set github_actions_runner_url and github_actions_runner_token before
+          running the runner phase. Pass via -e or set in vars/main.yml.
+      tags: runner
+
+    - name: "[runner] Create runner directory"
+      file:
+        path: "{{ github_actions_runner_dir }}"
+        state: directory
+        mode: "0755"
+      tags: runner
+
+    - name: "[runner] Download Actions runner tarball"
+      get_url:
+        url: "https://github.com/actions/runner/releases/download/v{{ github_actions_runner_version }}/actions-runner-linux-x64-{{ github_actions_runner_version }}.tar.gz"
+        dest: "/tmp/actions-runner.tar.gz"
+        mode: "0644"
+      tags: runner
+
+    - name: "[runner] Extract Actions runner"
+      unarchive:
+        src: /tmp/actions-runner.tar.gz
+        dest: "{{ github_actions_runner_dir }}"
+        remote_src: true
+        creates: "{{ github_actions_runner_dir }}/config.sh"
+      tags: runner
+
+    - name: "[runner] Remove existing runner config if present"
+      shell: ./config.sh remove --unattended --token {{ github_actions_runner_token }}
+      args:
+        chdir: "{{ github_actions_runner_dir }}"
+      register: runner_remove
+      failed_when: >
+        runner_remove.rc != 0 and
+        'not configured' not in runner_remove.stderr | lower and
+        'no such file' not in runner_remove.stderr | lower
+      changed_when: runner_remove.rc == 0
+      tags: runner
+
+    - name: "[runner] Configure Actions runner"
+      shell: >
+        ./config.sh
+        --url {{ github_actions_runner_url }}
+        --token {{ github_actions_runner_token }}
+        --labels "self-hosted,{{ runner_label }}"
+        --unattended
+      args:
+        chdir: "{{ github_actions_runner_dir }}"
+      tags: runner
+
+    - name: "[runner] Install Actions runner as system service"
+      shell: ./svc.sh install {{ inference_user }}
+      args:
+        chdir: "{{ github_actions_runner_dir }}"
+      become: true
+      tags: runner
+
+    - name: "[runner] Start Actions runner service"
+      shell: ./svc.sh start
+      args:
+        chdir: "{{ github_actions_runner_dir }}"
+      become: true
+      register: runner_start
+      changed_when: "'started' in runner_start.stdout | lower"
+      tags: runner
+
+    - name: "[runner] Verify runner service status"
+      shell: ./svc.sh status
+      args:
+        chdir: "{{ github_actions_runner_dir }}"
+      become: true
+      register: runner_status
+      changed_when: false
+      tags: runner
+
+    - name: "[runner] Show runner status"
+      debug:
+        msg: "{{ runner_status.stdout_lines }}"
+      tags: runner
+
+    # =========================================================================
+    # PHASE 5 — Node Exporter (system metrics → Prometheus on observability-vm)
+    # =========================================================================
+
+    - name: "[node-exporter] Run Node Exporter container"
+      community.docker.docker_container:
+        name: node-exporter
+        image: quay.io/prometheus/node-exporter:latest
+        state: started
+        restart_policy: unless-stopped
+        pull: true
+        network_mode: host
+        pid_mode: host
+        volumes:
+          - "/:/host:ro,rslave"
+        command: "--path.rootfs=/host"
+      tags: node-exporter
+
+    # =========================================================================
+    # PHASE 6 — Grafana Alloy (log shipping → Loki on observability-vm)
+    # If observability_server_ip is empty, Alloy starts but cannot ship logs.
+    # Re-run with --tags alloy -e "observability_server_ip=<IP>" once
+    # observability-vm is provisioned.
+    # =========================================================================
+
+    - name: "[alloy] Create Alloy config directory"
+      file:
+        path: "{{ ansible_env.HOME }}/alloy"
+        state: directory
+        mode: "0750"
+      tags: alloy
+
+    - name: "[alloy] Render Alloy config from template"
+      template:
+        src: templates/alloy-config.j2
+        dest: "{{ ansible_env.HOME }}/alloy/config.alloy"
+        mode: "0640"
+      tags: alloy
+
+    - name: "[alloy] Run Grafana Alloy container"
+      community.docker.docker_container:
+        name: alloy
+        image: grafana/alloy:latest
+        state: started
+        restart_policy: unless-stopped
+        pull: true
+        ports:
+          - "12345:12345"
+        volumes:
+          - "{{ ansible_env.HOME }}/alloy/config.alloy:/etc/alloy/config.alloy"
+          - "/var/log:/var/log:ro"
+          - "/run/log/journal:/run/log/journal:ro"
+          - "/var/run/docker.sock:/var/run/docker.sock"
+        command: "run /etc/alloy/config.alloy"
+      tags: alloy
+
+    - name: "[alloy] Verify all containers are running"
+      community.docker.docker_container_info:
+        name: "{{ item }}"
+      loop:
+        - portainer_agent
+        - node-exporter
+        - alloy
+      register: container_info
+      tags: alloy
+
+    - name: "[alloy] Show container states"
+      debug:
+        msg: "{{ item.container.Name }}: {{ item.container.State.Status }}"
+      loop: "{{ container_info.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      tags: alloy

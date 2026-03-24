@@ -1,0 +1,34 @@
+---
+# Platform-level defaults — override via -e flags at runtime as needed.
+
+# The Linux user that will own and run all services.
+# On cloud-init VMs this is ubuntu.
+inference_user: "{{ ansible_user_id }}"
+
+# GitHub Actions runner
+# Get a fresh registration token from:
+#   GitHub repo → Settings → Actions → Runners → New self-hosted runner
+# Token expires after 1 hour — generate it just before running this playbook.
+github_actions_runner_url: ""         # REQUIRED: set via -e at runtime
+github_actions_runner_token: ""       # REQUIRED: set via -e at runtime
+github_actions_runner_dir: "{{ ansible_env.HOME }}/actions-runner"
+# Find the latest release at https://github.com/actions/runner/releases
+github_actions_runner_version: "2.322.0"
+
+# Runner label — used to construct: "self-hosted,<runner_label>"
+# Service VMs should use "self-hosted-service"; infra runner uses "self-hosted-infra"
+runner_label: "self-hosted-service"
+
+# Portainer
+portainer_agent_port: 9001           # Portainer Agent — reports to Portainer Server
+portainer_server_port: 9443          # Portainer Server web UI (mgmt VM only)
+install_portainer_server: false      # set to true for one designated management VM
+
+# Observability endpoint for Alloy log shipping.
+# Override with -e "observability_server_ip=<IP>" once observability-vm is up.
+# Leave empty on first provisioning run (Alloy will start but not ship logs until set).
+observability_server_ip: ""
+
+# Terraform binary version (used by infra-runner.yml)
+# Check latest at https://releases.hashicorp.com/terraform/
+terraform_version: "1.9.8"

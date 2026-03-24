@@ -1,0 +1,198 @@
+# Reusable VM Provisioning Workflow
+#
+# Provisions a Proxmox VM via Terraform and configures it via Ansible.
+# Called from any project repo:
+#   uses: BlakeHastings/homelab-platform/.github/workflows/provision-vm.yml@main
+#
+# All jobs run on the terraform-runner VM (label: self-hosted-infra).
+# That VM has LAN access to Proxmox and stores Terraform state on its disk.
+
+name: Provision VM (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      vm_name:
+        description: "VM hostname (e.g., compute-01)"
+        required: true
+        type: string
+      cpu_cores:
+        description: "CPU cores"
+        required: false
+        type: number
+        default: 2
+      memory_mb:
+        description: "Memory in MB"
+        required: false
+        type: number
+        default: 4096
+      disk_gb:
+        description: "Root disk size in GB"
+        required: false
+        type: number
+        default: 40
+      runner_label:
+        description: "GitHub runner label for this VM (e.g., self-hosted-service). Full label will be: self-hosted,<runner_label>"
+        required: true
+        type: string
+      runner_repo_url:
+        description: "GitHub repo URL to register the runner to"
+        required: true
+        type: string
+      terraform_working_dir:
+        description: "Path to the Terraform config directory, relative to repo root (e.g., terraform/nodes/compute-01)"
+        required: true
+        type: string
+      observability_server_ip:
+        description: "Observability VM IP for Alloy log shipping. Leave empty on first run (before observability-vm exists)."
+        required: false
+        type: string
+        default: ""
+      install_portainer_server:
+        description: "Install Portainer Server CE on this VM. Only true for one designated management VM."
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      PROXMOX_VE_ENDPOINT:
+        required: true
+      PROXMOX_VE_API_TOKEN:
+        required: true
+      PROXMOX_VE_SSH_USERNAME:
+        required: true
+      PROXMOX_VE_SSH_PASSWORD:
+        required: true
+      ANSIBLE_PRIVATE_KEY:
+        required: true
+      GITHUB_ACTIONS_RUNNER_TOKEN:
+        required: true
+      TF_VAR_PROXMOX_NODE:
+        required: true
+      TF_VAR_TEMPLATE_ID:
+        required: false
+      TF_VAR_GATEWAY:
+        required: true
+      TF_VAR_SSH_PUBLIC_KEY:
+        required: true
+
+    outputs:
+      vm_ip:
+        description: "IP address of the provisioned VM"
+        value: ${{ jobs.provision.outputs.vm_ip }}
+
+jobs:
+  provision:
+    name: "Provision ${{ inputs.vm_name }}"
+    # Runs on the terraform-runner VM — the only runner with LAN access to Proxmox.
+    # State files also live on this machine.
+    runs-on: [self-hosted, self-hosted-infra]
+    outputs:
+      vm_ip: ${{ steps.tf-output.outputs.vm_ip }}
+
+    steps:
+      # Checkout the calling repo (where Terraform config lives).
+      - name: Checkout calling repo
+        uses: actions/checkout@v4
+
+      # Checkout homelab-platform for Ansible playbooks.
+      - name: Checkout homelab-platform (Ansible)
+        uses: actions/checkout@v4
+        with:
+          repository: BlakeHastings/homelab-platform
+          ref: main
+          path: platform
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false   # disable wrapper so `terraform output -raw` works cleanly
+
+      - name: Terraform Init
+        working-directory: ${{ inputs.terraform_working_dir }}
+        env:
+          PROXMOX_VE_ENDPOINT:     ${{ secrets.PROXMOX_VE_ENDPOINT }}
+          PROXMOX_VE_API_TOKEN:    ${{ secrets.PROXMOX_VE_API_TOKEN }}
+          PROXMOX_VE_SSH_USERNAME: ${{ secrets.PROXMOX_VE_SSH_USERNAME }}
+          PROXMOX_VE_SSH_PASSWORD: ${{ secrets.PROXMOX_VE_SSH_PASSWORD }}
+        run: terraform init -input=false
+
+      - name: Terraform Plan
+        working-directory: ${{ inputs.terraform_working_dir }}
+        env:
+          PROXMOX_VE_ENDPOINT:     ${{ secrets.PROXMOX_VE_ENDPOINT }}
+          PROXMOX_VE_API_TOKEN:    ${{ secrets.PROXMOX_VE_API_TOKEN }}
+          PROXMOX_VE_SSH_USERNAME: ${{ secrets.PROXMOX_VE_SSH_USERNAME }}
+          PROXMOX_VE_SSH_PASSWORD: ${{ secrets.PROXMOX_VE_SSH_PASSWORD }}
+          TF_VAR_proxmox_node:     ${{ secrets.TF_VAR_PROXMOX_NODE }}
+          TF_VAR_template_id:      ${{ secrets.TF_VAR_TEMPLATE_ID }}
+          TF_VAR_gateway:          ${{ secrets.TF_VAR_GATEWAY }}
+          TF_VAR_ssh_public_key:   ${{ secrets.TF_VAR_SSH_PUBLIC_KEY }}
+          TF_VAR_cpu_cores:        ${{ inputs.cpu_cores }}
+          TF_VAR_memory_mb:        ${{ inputs.memory_mb }}
+          TF_VAR_disk_gb:          ${{ inputs.disk_gb }}
+        run: terraform plan -input=false -no-color
+
+      - name: Terraform Apply
+        working-directory: ${{ inputs.terraform_working_dir }}
+        env:
+          PROXMOX_VE_ENDPOINT:     ${{ secrets.PROXMOX_VE_ENDPOINT }}
+          PROXMOX_VE_API_TOKEN:    ${{ secrets.PROXMOX_VE_API_TOKEN }}
+          PROXMOX_VE_SSH_USERNAME: ${{ secrets.PROXMOX_VE_SSH_USERNAME }}
+          PROXMOX_VE_SSH_PASSWORD: ${{ secrets.PROXMOX_VE_SSH_PASSWORD }}
+          TF_VAR_proxmox_node:     ${{ secrets.TF_VAR_PROXMOX_NODE }}
+          TF_VAR_template_id:      ${{ secrets.TF_VAR_TEMPLATE_ID }}
+          TF_VAR_gateway:          ${{ secrets.TF_VAR_GATEWAY }}
+          TF_VAR_ssh_public_key:   ${{ secrets.TF_VAR_SSH_PUBLIC_KEY }}
+          TF_VAR_cpu_cores:        ${{ inputs.cpu_cores }}
+          TF_VAR_memory_mb:        ${{ inputs.memory_mb }}
+          TF_VAR_disk_gb:          ${{ inputs.disk_gb }}
+        run: terraform apply -input=false -auto-approve -no-color
+
+      - name: Get VM IP
+        id: tf-output
+        working-directory: ${{ inputs.terraform_working_dir }}
+        run: echo "vm_ip=$(terraform output -raw vm_ip)" >> $GITHUB_OUTPUT
+
+      - name: Wait for VM SSH to be reachable
+        run: |
+          VM_IP="${{ steps.tf-output.outputs.vm_ip }}"
+          echo "Waiting for SSH on $VM_IP..."
+          for i in $(seq 1 30); do
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=5 \
+               -i "$HOME/.ssh/deploy_key" ubuntu@"$VM_IP" 'echo ok' 2>/dev/null; then
+              echo "SSH is up (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i/30 — retrying in 10s..."
+            sleep 10
+          done
+          echo "ERROR: SSH did not become reachable within 5 minutes"
+          exit 1
+
+      - name: Write SSH private key
+        run: |
+          mkdir -p "$HOME/.ssh"
+          echo "${{ secrets.ANSIBLE_PRIVATE_KEY }}" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+
+      - name: Run Ansible
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          VM_IP="${{ steps.tf-output.outputs.vm_ip }}"
+          ansible-playbook \
+            -i "$VM_IP," \
+            platform/ansible/base-vm.yml \
+            -e "ansible_user=ubuntu" \
+            -e "ansible_ssh_private_key_file=$HOME/.ssh/deploy_key" \
+            -e "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
+            -e "runner_label=${{ inputs.runner_label }}" \
+            -e "github_actions_runner_url=${{ inputs.runner_repo_url }}" \
+            -e "github_actions_runner_token=${{ secrets.GITHUB_ACTIONS_RUNNER_TOKEN }}" \
+            -e "observability_server_ip=${{ inputs.observability_server_ip }}" \
+            -e "install_portainer_server=${{ inputs.install_portainer_server }}"
+
+      - name: Cleanup secrets from runner disk
+        if: always()
+        run: rm -f "$HOME/.ssh/deploy_key"

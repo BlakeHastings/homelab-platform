@@ -1,0 +1,37 @@
+// Grafana Alloy config — Docker VMs and compute servers
+// Ships Docker container logs and systemd journal to central Loki.
+// Rendered by Ansible from ansible/templates/alloy-config.j2
+
+// Discover running Docker containers
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Collect logs from all Docker containers
+loki.source.docker "container_logs" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.docker.containers.targets
+  forward_to = [loki.write.central.receiver]
+
+  labels = {
+    job  = "docker",
+    node = constants.hostname,
+  }
+}
+
+// Collect systemd journal logs (system events, service logs)
+loki.source.journal "system_journal" {
+  forward_to = [loki.write.central.receiver]
+
+  labels = {
+    job  = "systemd",
+    node = constants.hostname,
+  }
+}
+
+// Ship to central Loki on observability-vm
+loki.write "central" {
+  endpoint {
+    url = "http://{{ observability_server_ip }}:3100/loki/api/v1/push"
+  }
+}

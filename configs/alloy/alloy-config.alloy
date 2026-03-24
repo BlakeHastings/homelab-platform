@@ -1,0 +1,38 @@
+// Grafana Alloy config — Docker VMs and compute servers
+// Ships Docker container logs and systemd journal to central Loki.
+//
+// REPLACE: OBSERVABILITY_SERVER_IP with your observability VM's IP or hostname
+
+// Discover running Docker containers
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+}
+
+// Collect logs from all Docker containers
+loki.source.docker "container_logs" {
+  host       = "unix:///var/run/docker.sock"
+  targets    = discovery.docker.containers.targets
+  forward_to = [loki.write.central.receiver]
+
+  labels = {
+    job  = "docker",
+    node = constants.hostname,
+  }
+}
+
+// Collect systemd journal logs (system events, service logs)
+loki.source.journal "system_journal" {
+  forward_to = [loki.write.central.receiver]
+
+  labels = {
+    job  = "systemd",
+    node = constants.hostname,
+  }
+}
+
+// Ship to central Loki
+loki.write "central" {
+  endpoint {
+    url = "http://OBSERVABILITY_SERVER_IP:3100/loki/api/v1/push"  // REPLACE
+  }
+}

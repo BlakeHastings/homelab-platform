@@ -1,0 +1,79 @@
+# Docker Compose — Observability VM
+# Runs the full LGTM stack: Grafana, Loki, Tempo, Prometheus
+#
+# Usage:
+#   mkdir -p data/{grafana,prometheus,loki,tempo}
+#   docker compose -f observability-vm.yml up -d
+
+services:
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=changeme    # REPLACE on first run
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:9090:9090"    # internal only
+    volumes:
+      - ./data/prometheus:/prometheus
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=90d'
+      - '--web.enable-lifecycle'    # allows config reload without restart
+
+  loki:
+    image: grafana/loki:latest
+    restart: unless-stopped
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./data/loki:/loki
+
+  tempo:
+    image: grafana/tempo:latest
+    restart: unless-stopped
+    ports:
+      - "3200:3200"     # Tempo query API
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+    volumes:
+      - ./data/tempo:/var/tempo
+    command: ["-config.file=/etc/tempo.yaml"]
+    configs:
+      - source: tempo_config
+        target: /etc/tempo.yaml
+
+configs:
+  tempo_config:
+    content: |
+      server:
+        http_listen_port: 3200
+      distributor:
+        receivers:
+          otlp:
+            protocols:
+              grpc:
+                endpoint: 0.0.0.0:4317
+              http:
+                endpoint: 0.0.0.0:4318
+      storage:
+        trace:
+          backend: local
+          local:
+            path: /var/tempo/traces
+      compactor:
+        compaction:
+          block_retention: 72h
+
+# Create a prometheus.yml alongside this file with your scrape targets.
