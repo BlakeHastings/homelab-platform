@@ -1,6 +1,8 @@
 # homelab-platform
 
-Reusable infrastructure primitives for Proxmox-based homelabs. Any project can use these to provision and configure VMs via a shared GitHub Actions infra runner.
+Reusable infrastructure primitives for Proxmox-based homelabs. Provides the low-level building blocks that all service repos build on top of.
+
+For deployed services (observability, DNS, etc.) see [homelab-services](https://github.com/BlakeHastings/homelab-services).
 
 ---
 
@@ -10,19 +12,17 @@ Reusable infrastructure primitives for Proxmox-based homelabs. Any project can u
 |------|-----------|
 | `.github/workflows/provision-vm.yml` | Reusable workflow: Terraform + Ansible for any VM |
 | `terraform/modules/proxmox-vm/` | Generic Proxmox VM module (cloud-init, DHCP via MAC) |
-| `ansible/base-vm.yml` | Configures any service VM: Docker, runner, observability |
+| `ansible/base-vm.yml` | Configures any service VM: Docker, runner, Node Exporter, Alloy |
 | `ansible/infra-runner.yml` | Configures the terraform-runner VM itself |
 | `ansible/vars/main.yml` | Platform defaults |
-| `ansible/templates/alloy-config.j2` | Grafana Alloy log shipping template |
-| `configs/docker-compose/observability-vm.yml` | LGTM observability stack |
-| `configs/alloy/alloy-config.alloy` | Static Alloy config (for manual deploys) |
+| `ansible/templates/alloy-config.j2` | Grafana Alloy log shipping template (deployed to every VM) |
+| `configs/alloy/alloy-config.alloy` | Static Alloy config (for manual node setup) |
 | `docs/patterns/runner-tiers.md` | The infra/service runner tier model |
 | `docs/nodes/terraform-runner/` | How to bootstrap the infra runner |
-| `docs/nodes/observability-vm/` | How to deploy the LGTM stack |
 | `docs/examples/new-node/` | Complete working example for a new VM node |
 | `docs/troubleshooting/` | Common Proxmox provisioning and Ansible gotchas |
 | `docs/decisions/` | Architecture decision records |
-| `docs/observability/` | Observability stack overview and exporters |
+| `docs/observability/` | How observability agents work on every node |
 | `docs/deployment/` | Runner management and multi-stage workflow patterns |
 
 ---
@@ -45,9 +45,9 @@ Two tiers — see [docs/patterns/runner-tiers.md](docs/patterns/runner-tiers.md)
 In your project repo, add a Terraform node config that uses the `proxmox-vm` module:
 
 ```hcl
-# terraform/nodes/my-vm/main.tf
-module "my_vm" {
-  source = "github.com/BlakeHastings/homelab-platform//terraform/modules/proxmox-vm"
+# services/my-service/terraform/main.tf
+module "vm" {
+  source = "github.com/BlakeHastings/homelab-platform//terraform/modules/proxmox-vm?ref=main"
 
   vm_name    = "my-vm"
   vm_id      = 202
@@ -65,9 +65,9 @@ jobs:
     uses: BlakeHastings/homelab-platform/.github/workflows/provision-vm.yml@main
     with:
       vm_name: my-vm
-      runner_label: self-hosted-service
+      runner_label: my-vm                                  # specific label for targeted deploys
       runner_repo_url: https://github.com/your-org/your-repo
-      terraform_working_dir: terraform/nodes/my-vm
+      terraform_working_dir: services/my-service/terraform
     secrets:
       PROXMOX_VE_ENDPOINT:         ${{ secrets.PROXMOX_VE_ENDPOINT }}
       PROXMOX_VE_API_TOKEN:        ${{ secrets.PROXMOX_VE_API_TOKEN }}
@@ -88,7 +88,7 @@ jobs:
 # .github/workflows/deploy.yml
 jobs:
   deploy:
-    runs-on: [self-hosted, self-hosted-service]
+    runs-on: [self-hosted, my-vm]    # matches runner_label from provision step
     steps:
       - uses: actions/checkout@v4
       - run: docker compose up -d
@@ -117,13 +117,11 @@ If using Claude Code: run `/add-node` in your project repo.
 |-------|----------|
 | Runner tier model | [docs/patterns/runner-tiers.md](docs/patterns/runner-tiers.md) |
 | Bootstrap terraform-runner | [docs/nodes/terraform-runner/01-bootstrap.md](docs/nodes/terraform-runner/01-bootstrap.md) |
-| Deploy LGTM observability | [docs/nodes/observability-vm/01-lgtm-stack.md](docs/nodes/observability-vm/01-lgtm-stack.md) |
 | New VM example | [docs/examples/new-node/](docs/examples/new-node/) |
+| Observability agents (per-node) | [docs/observability/overview.md](docs/observability/overview.md) |
 | Proxmox provisioning gotchas | [docs/troubleshooting/proxmox-provisioning.md](docs/troubleshooting/proxmox-provisioning.md) |
 | Ansible common gotchas | [docs/troubleshooting/ansible-common-gotchas.md](docs/troubleshooting/ansible-common-gotchas.md) |
 | Why dedicated infra runner | [docs/decisions/terraform-runner-architecture.md](docs/decisions/terraform-runner-architecture.md) |
 | Secrets management | [docs/decisions/secrets-management.md](docs/decisions/secrets-management.md) |
-| Observability overview | [docs/observability/overview.md](docs/observability/overview.md) |
-| Exporters reference | [docs/observability/exporters.md](docs/observability/exporters.md) |
 | Runner management | [docs/deployment/runner-management.md](docs/deployment/runner-management.md) |
 | Multi-stage workflows | [docs/deployment/multi-stage-workflows.md](docs/deployment/multi-stage-workflows.md) |

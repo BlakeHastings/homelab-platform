@@ -53,4 +53,4 @@ When any new machine joins the cluster:
 - [ ] Verify node appears in Node Exporter Full dashboard in Grafana
 
 → Detailed setup: [exporters.md](exporters.md)
-→ LGTM stack deployment: [../nodes/observability-vm/01-lgtm-stack.md](../nodes/observability-vm/01-lgtm-stack.md)
+→ LGTM stack deployment: [homelab-services/services/observability](https://github.com/BlakeHastings/homelab-services/tree/main/services/observability)
