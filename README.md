@@ -19,6 +19,11 @@ Reusable infrastructure primitives for Proxmox-based homelabs. Any project can u
 | `docs/patterns/runner-tiers.md` | The infra/service runner tier model |
 | `docs/nodes/terraform-runner/` | How to bootstrap the infra runner |
 | `docs/nodes/observability-vm/` | How to deploy the LGTM stack |
+| `docs/examples/new-node/` | Complete working example for a new VM node |
+| `docs/troubleshooting/` | Common Proxmox provisioning and Ansible gotchas |
+| `docs/decisions/` | Architecture decision records |
+| `docs/observability/` | Observability stack overview and exporters |
+| `docs/deployment/` | Runner management and multi-stage workflow patterns |
 
 ---
 
@@ -63,7 +68,18 @@ jobs:
       runner_label: self-hosted-service
       runner_repo_url: https://github.com/your-org/your-repo
       terraform_working_dir: terraform/nodes/my-vm
-    secrets: inherit
+    secrets:
+      PROXMOX_VE_ENDPOINT:         ${{ secrets.PROXMOX_VE_ENDPOINT }}
+      PROXMOX_VE_API_TOKEN:        ${{ secrets.PROXMOX_VE_API_TOKEN }}
+      PROXMOX_VE_SSH_USERNAME:     ${{ secrets.PROXMOX_VE_SSH_USERNAME }}
+      PROXMOX_VE_SSH_PASSWORD:     ${{ secrets.PROXMOX_VE_SSH_PASSWORD }}
+      ANSIBLE_PRIVATE_KEY:         ${{ secrets.ANSIBLE_PRIVATE_KEY }}
+      GITHUB_ACTIONS_RUNNER_TOKEN: ${{ secrets.GITHUB_ACTIONS_RUNNER_TOKEN }}
+      TF_VAR_PROXMOX_NODE:         ${{ secrets.TF_VAR_PROXMOX_NODE }}
+      TF_VAR_TEMPLATE_ID:          ${{ secrets.TF_VAR_TEMPLATE_ID }}
+      TF_VAR_GATEWAY:              ${{ secrets.TF_VAR_GATEWAY }}
+      TF_VAR_SSH_PUBLIC_KEY:       ${{ secrets.TF_VAR_SSH_PUBLIC_KEY }}
+# Note: secrets: inherit does NOT work cross-repo — each secret must be mapped explicitly
 ```
 
 ### 2. Deploy services to it
@@ -84,3 +100,30 @@ jobs:
 
 Bootstrap the terraform-runner once before anything else:
 → [docs/nodes/terraform-runner/01-bootstrap.md](docs/nodes/terraform-runner/01-bootstrap.md)
+
+---
+
+## Adding a New VM to a Project
+
+See [docs/examples/new-node/](docs/examples/new-node/) for complete working templates.
+
+If using Claude Code: run `/add-node` in your project repo.
+
+---
+
+## Documentation
+
+| Topic | Location |
+|-------|----------|
+| Runner tier model | [docs/patterns/runner-tiers.md](docs/patterns/runner-tiers.md) |
+| Bootstrap terraform-runner | [docs/nodes/terraform-runner/01-bootstrap.md](docs/nodes/terraform-runner/01-bootstrap.md) |
+| Deploy LGTM observability | [docs/nodes/observability-vm/01-lgtm-stack.md](docs/nodes/observability-vm/01-lgtm-stack.md) |
+| New VM example | [docs/examples/new-node/](docs/examples/new-node/) |
+| Proxmox provisioning gotchas | [docs/troubleshooting/proxmox-provisioning.md](docs/troubleshooting/proxmox-provisioning.md) |
+| Ansible common gotchas | [docs/troubleshooting/ansible-common-gotchas.md](docs/troubleshooting/ansible-common-gotchas.md) |
+| Why dedicated infra runner | [docs/decisions/terraform-runner-architecture.md](docs/decisions/terraform-runner-architecture.md) |
+| Secrets management | [docs/decisions/secrets-management.md](docs/decisions/secrets-management.md) |
+| Observability overview | [docs/observability/overview.md](docs/observability/overview.md) |
+| Exporters reference | [docs/observability/exporters.md](docs/observability/exporters.md) |
+| Runner management | [docs/deployment/runner-management.md](docs/deployment/runner-management.md) |
+| Multi-stage workflows | [docs/deployment/multi-stage-workflows.md](docs/deployment/multi-stage-workflows.md) |

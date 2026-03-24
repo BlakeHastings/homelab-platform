@@ -1,0 +1,42 @@
+# Example: Provision my-vm
+#
+# Copy this to your project repo as .github/workflows/provision-my-vm.yml
+# and update the REPLACE values.
+#
+# Prerequisites:
+#   1. Proxmox Ubuntu 24.04 template exists (VMID 9000)
+#   2. terraform-runner VM bootstrapped (see homelab-platform docs)
+#   3. GitHub Secrets set on this repo (see docs/nodes/terraform-runner/01-bootstrap.md)
+#   4. terraform/nodes/my-vm/ files added to this repo (see docs/examples/new-node/)
+#
+# Trigger manually: Actions → Provision my-vm → Run workflow
+
+name: Provision my-vm    # REPLACE: my-vm
+
+on:
+  workflow_dispatch:    # manual trigger only — intentional
+
+jobs:
+  provision:
+    uses: BlakeHastings/homelab-platform/.github/workflows/provision-vm.yml@main
+    with:
+      vm_name: "my-vm"                                          # REPLACE
+      cpu_cores: 2                                              # REPLACE if needed
+      memory_mb: 4096                                           # REPLACE if needed
+      disk_gb: 40                                               # REPLACE if needed
+      runner_label: "self-hosted-service"                       # keep unless you need a specific label
+      runner_repo_url: "https://github.com/your-org/your-repo" # REPLACE
+      terraform_working_dir: "terraform/nodes/my-vm"           # REPLACE: match your node dir
+      observability_server_ip: ""                               # REPLACE once observability-vm is up
+      install_portainer_server: false                           # set true for one designated mgmt VM
+    secrets:
+      PROXMOX_VE_ENDPOINT:     ${{ secrets.PROXMOX_VE_ENDPOINT }}
+      PROXMOX_VE_API_TOKEN:    ${{ secrets.PROXMOX_VE_API_TOKEN }}
+      PROXMOX_VE_SSH_USERNAME: ${{ secrets.PROXMOX_VE_SSH_USERNAME }}
+      PROXMOX_VE_SSH_PASSWORD: ${{ secrets.PROXMOX_VE_SSH_PASSWORD }}
+      ANSIBLE_PRIVATE_KEY:     ${{ secrets.ANSIBLE_PRIVATE_KEY }}
+      GITHUB_ACTIONS_RUNNER_TOKEN: ${{ secrets.GITHUB_ACTIONS_RUNNER_TOKEN }}
+      TF_VAR_PROXMOX_NODE:     ${{ secrets.TF_VAR_PROXMOX_NODE }}
+      TF_VAR_TEMPLATE_ID:      ${{ secrets.TF_VAR_TEMPLATE_ID }}
+      TF_VAR_GATEWAY:          ${{ secrets.TF_VAR_GATEWAY }}
+      TF_VAR_SSH_PUBLIC_KEY:   ${{ secrets.TF_VAR_SSH_PUBLIC_KEY }}
