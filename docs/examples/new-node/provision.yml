@@ -24,8 +24,6 @@ jobs:
       cpu_cores: 2                                              # REPLACE if needed
       memory_mb: 4096                                           # REPLACE if needed
       disk_gb: 40                                               # REPLACE if needed
-      runner_label: "self-hosted-service"                       # keep unless you need a specific label
-      runner_repo_url: "https://github.com/your-org/your-repo" # REPLACE
       terraform_working_dir: "terraform/nodes/my-vm"           # REPLACE: match your node dir
       observability_server_ip: ""                               # REPLACE once observability-vm is up
       install_portainer_server: false                           # set true for one designated mgmt VM
@@ -35,7 +33,6 @@ jobs:
       PROXMOX_VE_SSH_USERNAME: ${{ secrets.PROXMOX_VE_SSH_USERNAME }}
       PROXMOX_VE_SSH_PASSWORD: ${{ secrets.PROXMOX_VE_SSH_PASSWORD }}
       ANSIBLE_PRIVATE_KEY:     ${{ secrets.ANSIBLE_PRIVATE_KEY }}
-      GH_PAT:                      ${{ secrets.GH_PAT }}
       TF_VAR_PROXMOX_NODE:     ${{ secrets.TF_VAR_PROXMOX_NODE }}
       TF_VAR_TEMPLATE_ID:      ${{ secrets.TF_VAR_TEMPLATE_ID }}
       TF_VAR_GATEWAY:          ${{ secrets.TF_VAR_GATEWAY }}

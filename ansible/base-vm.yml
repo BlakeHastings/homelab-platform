@@ -5,22 +5,18 @@
 #   Phase 1 — Docker + NVIDIA Container Toolkit (docker)
 #   Phase 2 — Portainer Server, CE (portainer-server) — one designated mgmt VM only
 #   Phase 3 — Portainer Agent (portainer-agent)
-#   Phase 4 — GitHub Actions runner (runner)
-#   Phase 5 — Node Exporter (node-exporter)
-#   Phase 6 — Grafana Alloy — log shipping to observability-vm (alloy)
+#   Phase 4 — Node Exporter (node-exporter)
+#   Phase 5 — Grafana Alloy — log shipping to observability-vm (alloy)
 #
 # Usage (GitHub Actions calls this automatically via provision-vm.yml):
 #   ansible-playbook -i "<VM_IP>," ansible/base-vm.yml \
 #     -e "ansible_user=ubuntu" \
 #     -e "ansible_ssh_private_key_file=~/.ssh/deploy_key" \
 #     -e "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
-#     -e "runner_label=self-hosted-service" \
-#     -e "github_actions_runner_url=https://github.com/your-org/your-repo" \
-#     -e "github_actions_runner_token=YOUR_TOKEN" \
 #     -e "observability_server_ip=192.168.1.51" \
 #     -e "install_portainer_server=true"   # mgmt VM only
 #
-# Tags: docker | portainer-server | portainer-agent | runner | node-exporter | alloy
+# Tags: docker | portainer-server | portainer-agent | node-exporter | alloy
 
 - name: Docker VM setup
   hosts: all
@@ -100,98 +96,7 @@
       tags: portainer-agent
 
     # =========================================================================
-    # PHASE 4 — GitHub Actions Runner
-    # Runner label will be: "self-hosted,<runner_label>"
-    # A fresh registration token is required — expires 1 hour after generation.
-    # =========================================================================
-
-    - name: "[runner] Fail early if runner URL or token not set"
-      assert:
-        that:
-          - github_actions_runner_url != ""
-          - github_actions_runner_token != ""
-        fail_msg: >
-          Set github_actions_runner_url and github_actions_runner_token before
-          running the runner phase. Pass via -e or set in vars/main.yml.
-      tags: runner
-
-    - name: "[runner] Create runner directory"
-      file:
-        path: "{{ github_actions_runner_dir }}"
-        state: directory
-        mode: "0755"
-      tags: runner
-
-    - name: "[runner] Download Actions runner tarball"
-      get_url:
-        url: "https://github.com/actions/runner/releases/download/v{{ github_actions_runner_version }}/actions-runner-linux-x64-{{ github_actions_runner_version }}.tar.gz"
-        dest: "/tmp/actions-runner.tar.gz"
-        mode: "0644"
-      tags: runner
-
-    - name: "[runner] Extract Actions runner"
-      unarchive:
-        src: /tmp/actions-runner.tar.gz
-        dest: "{{ github_actions_runner_dir }}"
-        remote_src: true
-        creates: "{{ github_actions_runner_dir }}/config.sh"
-      tags: runner
-
-    - name: "[runner] Remove existing runner config if present"
-      shell: ./config.sh remove --unattended --token {{ github_actions_runner_token }}
-      args:
-        chdir: "{{ github_actions_runner_dir }}"
-      register: runner_remove
-      failed_when: >
-        runner_remove.rc != 0 and
-        'not configured' not in runner_remove.stderr | lower and
-        'no such file' not in runner_remove.stderr | lower
-      changed_when: runner_remove.rc == 0
-      tags: runner
-
-    - name: "[runner] Configure Actions runner"
-      shell: >
-        ./config.sh
-        --url {{ github_actions_runner_url }}
-        --token {{ github_actions_runner_token }}
-        --labels "self-hosted,{{ runner_label }}"
-        --unattended
-      args:
-        chdir: "{{ github_actions_runner_dir }}"
-      tags: runner
-
-    - name: "[runner] Install Actions runner as system service"
-      shell: ./svc.sh install {{ inference_user }}
-      args:
-        chdir: "{{ github_actions_runner_dir }}"
-      become: true
-      tags: runner
-
-    - name: "[runner] Start Actions runner service"
-      shell: ./svc.sh start
-      args:
-        chdir: "{{ github_actions_runner_dir }}"
-      become: true
-      register: runner_start
-      changed_when: "'started' in runner_start.stdout | lower"
-      tags: runner
-
-    - name: "[runner] Verify runner service status"
-      shell: ./svc.sh status
-      args:
-        chdir: "{{ github_actions_runner_dir }}"
-      become: true
-      register: runner_status
-      changed_when: false
-      tags: runner
-
-    - name: "[runner] Show runner status"
-      debug:
-        msg: "{{ runner_status.stdout_lines }}"
-      tags: runner
-
-    # =========================================================================
-    # PHASE 5 — Node Exporter (system metrics → Prometheus on observability-vm)
+    # PHASE 4 — Node Exporter (system metrics → Prometheus on observability-vm)
     # =========================================================================
 
     - name: "[node-exporter] Run Node Exporter container"
@@ -209,7 +114,7 @@
       tags: node-exporter
 
     # =========================================================================
-    # PHASE 6 — Grafana Alloy (log shipping → Loki on observability-vm)
+    # PHASE 5 — Grafana Alloy (log shipping → Loki on observability-vm)
     # If observability_server_ip is empty, Alloy starts but cannot ship logs.
     # Re-run with --tags alloy -e "observability_server_ip=<IP>" once
     # observability-vm is provisioned.

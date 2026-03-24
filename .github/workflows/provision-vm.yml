@@ -6,6 +6,9 @@
 #
 # All jobs run on the terraform-runner VM (label: self-hosted-infra).
 # That VM has LAN access to Proxmox and stores Terraform state on its disk.
+#
+# After provisioning, deployment is also handled from the terraform-runner
+# via SSH — service VMs are plain Docker hosts, not GitHub Actions runners.
 
 name: Provision VM (reusable)
 
@@ -13,7 +16,7 @@ on:
   workflow_call:
     inputs:
       vm_name:
-        description: "VM hostname (e.g., compute-01)"
+        description: "VM hostname (e.g., dns-vm)"
         required: true
         type: string
       cpu_cores:
@@ -31,14 +34,6 @@ on:
         required: false
         type: number
         default: 40
-      runner_label:
-        description: "GitHub runner label for this VM (e.g., dns-vm). Full label will be: self-hosted,<runner_label>"
-        required: true
-        type: string
-      runner_repo_url:
-        description: "GitHub repo URL to register the runner to (e.g., https://github.com/BlakeHastings/homelab-services)"
-        required: true
-        type: string
       terraform_working_dir:
         description: "Path to the Terraform config directory, relative to repo root (e.g., services/dns/terraform)"
         required: true
@@ -65,11 +60,6 @@ on:
         required: true
       ANSIBLE_PRIVATE_KEY:
         required: true
-      GH_PAT:
-        # Personal Access Token with repo scope.
-        # Used to generate a fresh runner registration token at provision time
-        # (GitHub runner tokens expire after 1 hour, so they can't be stored as static secrets).
-        required: true
       TF_VAR_PROXMOX_NODE:
         required: true
       TF_VAR_TEMPLATE_ID:
@@ -87,18 +77,14 @@ on:
 jobs:
   provision:
     name: "Provision ${{ inputs.vm_name }}"
-    # Runs on the terraform-runner VM — the only runner with LAN access to Proxmox.
-    # State files also live on this machine.
     runs-on: [self-hosted, self-hosted-infra]
     outputs:
       vm_ip: ${{ steps.tf-output.outputs.vm_ip }}
 
     steps:
-      # Checkout the calling repo (where Terraform config lives).
       - name: Checkout calling repo
         uses: actions/checkout@v4
 
-      # Checkout homelab-platform for Ansible playbooks.
       - name: Checkout homelab-platform (Ansible)
         uses: actions/checkout@v4
         with:
@@ -109,7 +95,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_wrapper: false   # disable wrapper so `terraform output -raw` works cleanly
+          terraform_wrapper: false
 
       - name: Terraform Init
         working-directory: ${{ inputs.terraform_working_dir }}
@@ -179,21 +165,6 @@ jobs:
           echo "ERROR: SSH did not become reachable within 5 minutes"
           exit 1
 
-      - name: Generate runner registration token
-        id: runner-token
-        run: |
-          REPO_PATH=$(echo "${{ inputs.runner_repo_url }}" | sed 's|https://github.com/||')
-          TOKEN=$(curl -s -X POST \
-            -H "Authorization: Bearer ${{ secrets.GH_PAT }}" \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO_PATH}/actions/runners/registration-token" \
-            | jq -r .token)
-          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
-            echo "ERROR: Failed to generate runner registration token"
-            exit 1
-          fi
-          echo "token=$TOKEN" >> $GITHUB_OUTPUT
-
       - name: Run Ansible
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
@@ -205,9 +176,6 @@ jobs:
             -e "ansible_user=ubuntu" \
             -e "ansible_ssh_private_key_file=$HOME/.ssh/deploy_key" \
             -e "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
-            -e "runner_label=${{ inputs.runner_label }}" \
-            -e "github_actions_runner_url=${{ inputs.runner_repo_url }}" \
-            -e "github_actions_runner_token=${{ steps.runner-token.outputs.token }}" \
             -e "observability_server_ip=${{ inputs.observability_server_ip }}" \
             -e "install_portainer_server=${{ inputs.install_portainer_server }}"
 

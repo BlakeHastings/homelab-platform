@@ -5,20 +5,6 @@
 # On cloud-init VMs this is ubuntu.
 inference_user: "{{ ansible_user_id }}"
 
-# GitHub Actions runner
-# Get a fresh registration token from:
-#   GitHub repo → Settings → Actions → Runners → New self-hosted runner
-# Token expires after 1 hour — generate it just before running this playbook.
-github_actions_runner_url: ""         # REQUIRED: set via -e at runtime
-github_actions_runner_token: ""       # REQUIRED: set via -e at runtime
-github_actions_runner_dir: "{{ ansible_env.HOME }}/actions-runner"
-# Find the latest release at https://github.com/actions/runner/releases
-github_actions_runner_version: "2.322.0"
-
-# Runner label — used to construct: "self-hosted,<runner_label>"
-# Service VMs should use "self-hosted-service"; infra runner uses "self-hosted-infra"
-runner_label: "self-hosted-service"
-
 # Portainer
 portainer_agent_port: 9001           # Portainer Agent — reports to Portainer Server
 portainer_server_port: 9443          # Portainer Server web UI (mgmt VM only)
