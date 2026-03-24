@@ -35,7 +35,7 @@ jobs:
       PROXMOX_VE_SSH_USERNAME: ${{ secrets.PROXMOX_VE_SSH_USERNAME }}
       PROXMOX_VE_SSH_PASSWORD: ${{ secrets.PROXMOX_VE_SSH_PASSWORD }}
       ANSIBLE_PRIVATE_KEY:     ${{ secrets.ANSIBLE_PRIVATE_KEY }}
-      GITHUB_ACTIONS_RUNNER_TOKEN: ${{ secrets.GITHUB_ACTIONS_RUNNER_TOKEN }}
+      GH_PAT:                      ${{ secrets.GH_PAT }}
       TF_VAR_PROXMOX_NODE:     ${{ secrets.TF_VAR_PROXMOX_NODE }}
       TF_VAR_TEMPLATE_ID:      ${{ secrets.TF_VAR_TEMPLATE_ID }}
       TF_VAR_GATEWAY:          ${{ secrets.TF_VAR_GATEWAY }}

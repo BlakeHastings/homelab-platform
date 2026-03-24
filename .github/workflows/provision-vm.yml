@@ -32,15 +32,15 @@ on:
         type: number
         default: 40
       runner_label:
-        description: "GitHub runner label for this VM (e.g., self-hosted-service). Full label will be: self-hosted,<runner_label>"
+        description: "GitHub runner label for this VM (e.g., dns-vm). Full label will be: self-hosted,<runner_label>"
         required: true
         type: string
       runner_repo_url:
-        description: "GitHub repo URL to register the runner to"
+        description: "GitHub repo URL to register the runner to (e.g., https://github.com/BlakeHastings/homelab-services)"
         required: true
         type: string
       terraform_working_dir:
-        description: "Path to the Terraform config directory, relative to repo root (e.g., terraform/nodes/compute-01)"
+        description: "Path to the Terraform config directory, relative to repo root (e.g., services/dns/terraform)"
         required: true
         type: string
       observability_server_ip:
@@ -65,7 +65,10 @@ on:
         required: true
       ANSIBLE_PRIVATE_KEY:
         required: true
-      GITHUB_ACTIONS_RUNNER_TOKEN:
+      GH_PAT:
+        # Personal Access Token with repo scope.
+        # Used to generate a fresh runner registration token at provision time
+        # (GitHub runner tokens expire after 1 hour, so they can't be stored as static secrets).
         required: true
       TF_VAR_PROXMOX_NODE:
         required: true
@@ -154,6 +157,12 @@ jobs:
         working-directory: ${{ inputs.terraform_working_dir }}
         run: echo "vm_ip=$(terraform output -raw vm_ip)" >> $GITHUB_OUTPUT
 
+      - name: Write SSH private key
+        run: |
+          mkdir -p "$HOME/.ssh"
+          echo "${{ secrets.ANSIBLE_PRIVATE_KEY }}" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+
       - name: Wait for VM SSH to be reachable
         run: |
           VM_IP="${{ steps.tf-output.outputs.vm_ip }}"
@@ -170,11 +179,20 @@ jobs:
           echo "ERROR: SSH did not become reachable within 5 minutes"
           exit 1
 
-      - name: Write SSH private key
+      - name: Generate runner registration token
+        id: runner-token
         run: |
-          mkdir -p "$HOME/.ssh"
-          echo "${{ secrets.ANSIBLE_PRIVATE_KEY }}" > "$HOME/.ssh/deploy_key"
-          chmod 600 "$HOME/.ssh/deploy_key"
+          REPO_PATH=$(echo "${{ inputs.runner_repo_url }}" | sed 's|https://github.com/||')
+          TOKEN=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.GH_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO_PATH}/actions/runners/registration-token" \
+            | jq -r .token)
+          if [ -z "$TOKEN" ] || [ "$TOKEN" = "null" ]; then
+            echo "ERROR: Failed to generate runner registration token"
+            exit 1
+          fi
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
 
       - name: Run Ansible
         env:
@@ -189,7 +207,7 @@ jobs:
             -e "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
             -e "runner_label=${{ inputs.runner_label }}" \
             -e "github_actions_runner_url=${{ inputs.runner_repo_url }}" \
-            -e "github_actions_runner_token=${{ secrets.GITHUB_ACTIONS_RUNNER_TOKEN }}" \
+            -e "github_actions_runner_token=${{ steps.runner-token.outputs.token }}" \
             -e "observability_server_ip=${{ inputs.observability_server_ip }}" \
             -e "install_portainer_server=${{ inputs.install_portainer_server }}"
 
