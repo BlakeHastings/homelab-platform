@@ -42,9 +42,13 @@ qm set 9000 --ide2 local-lvm:cloudinit
 qm set 9000 --serial0 socket --vga serial0
 qm set 9000 --agent enabled=1
 qm resize 9000 scsi0 +28G   # total ~30GB
+
+# Set temporary credentials and DHCP so you can SSH in
+qm set 9000 --ciuser ubuntu --cipassword ubuntu
+qm set 9000 --ipconfig0 ip=dhcp
 ```
 
-Start the VM temporarily, then SSH in and run:
+Start the VM temporarily, then SSH in (check the Proxmox console or your router for the DHCP-assigned IP) and run:
 
 ```bash
 apt install -y qemu-guest-agent && systemctl enable qemu-guest-agent
@@ -142,12 +146,14 @@ After cloning:
 - Open the VM → Hardware → Add → CloudInit Drive → storage: local
 - Open the VM → Cloud-Init tab:
   - User: `ubuntu`
+  - SSH Keys: paste the contents of `~/.ssh/homelab-deploy.pub` (generated in [step 3 of prerequisites](#3-deploy-ssh-keypair))
   - IP Config: Static, set to e.g. `192.168.1.20/24`, Gateway: `192.168.1.1`
+- Click **Regenerate Image** to apply the Cloud-Init settings
 - Start the VM
 
 Wait ~60 seconds for cloud-init to complete, then test SSH:
 ```bash
-ssh ubuntu@192.168.1.20
+ssh -i ~/.ssh/homelab-deploy ubuntu@192.168.1.20
 ```
 
 ### Step 2 — Generate a fresh GitHub runner token
@@ -160,6 +166,7 @@ Clone `homelab-platform` to your dev machine, then from the repo root:
 
 ```bash
 ansible-playbook -i "192.168.1.20," ansible/infra-runner.yml \
+  --private-key ~/.ssh/homelab-deploy \
   --ask-become-pass \
   -e "ansible_user=ubuntu" \
   -e "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
