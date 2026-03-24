@@ -143,8 +143,7 @@ In the **Proxmox web UI**:
 5. Click Clone
 
 After cloning:
-- Open the VM → Hardware → Add → CloudInit Drive → storage: local
-- Open the VM → Cloud-Init tab:
+- Open the VM → Cloud-Init tab (the CloudInit drive is inherited from the template — no need to add one):
   - User: `ubuntu`
   - SSH Keys: paste the contents of `~/.ssh/homelab-deploy.pub` (generated in [step 3 of prerequisites](#3-deploy-ssh-keypair))
   - IP Config: Static, set to e.g. `192.168.1.20/24`, Gateway: `192.168.1.1`
