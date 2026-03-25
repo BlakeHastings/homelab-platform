@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir -p /c/Users/Blake/source/repos/homelab-services/.github/workflows)",
+      "Bash(mkdir -p /c/Users/Blake/source/repos/homelab-services/services/observability/terraform)",
+      "Bash(mkdir -p /c/Users/Blake/source/repos/homelab-services/services/dns/terraform)",
+      "Bash(rm configs/docker-compose/observability-vm.yml)",
+      "Bash(rm docs/nodes/observability-vm/01-lgtm-stack.md docs/nodes/observability-vm/02-dashboards.md docs/nodes/observability-vm/03-alerting.md)",
+      "Bash(rmdir docs/nodes/observability-vm)",
+      "Bash(rmdir docs/nodes)",
+      "Bash(git reset:*)",
+      "Bash(git commit:*)",
+      "Bash(gh auth:*)",
+      "Bash(gh repo:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(gh secret:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
