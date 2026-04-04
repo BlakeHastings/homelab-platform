@@ -161,16 +161,30 @@ In GitHub: your repo → Settings → Actions → Runners → New self-hosted ru
 
 ### Step 3 — Run the bootstrap playbook
 
-SSH into the VM, clone the repo, and run the playbook locally:
+SSH into the VM and install dependencies:
 
 ```bash
 ssh ubuntu@192.168.1.20
 
-# On the VM:
-sudo apt install -y ansible git
+# Install uv, then ansible-core with required Python libraries
+curl -LsSf https://astral.sh/uv/install.sh | sh
+source ~/.bashrc
+
+uv tool install ansible-core --with ansible --with docker --with requests
+export PATH="$HOME/.local/bin:$PATH"
+
+# Install required Ansible collections
+ansible-galaxy collection install community.docker community.general
+
+# Clone the repo
+sudo apt install -y git
 git clone https://github.com/BlakeHastings/homelab-platform.git
 cd homelab-platform
+```
 
+Run the full playbook (docker phase first):
+
+```bash
 ansible-playbook -i "localhost," ansible/infra-runner.yml \
   --ask-become-pass \
   -e "ansible_connection=local" \
@@ -180,10 +194,21 @@ ansible-playbook -i "localhost," ansible/infra-runner.yml \
   -e "github_actions_runner_token=<YOUR_FRESH_TOKEN>"
 ```
 
-After the `docker` phase completes, you may need to log out and back in for the docker group to take effect:
+The docker phase adds `ubuntu` to the `docker` group. **You must log out and back in before continuing**, otherwise container tasks will fail with a permission error:
+
 ```bash
-# Re-run skipping docker phase if you hit docker permission errors
-ansible-playbook -i "localhost," ansible/infra-runner.yml --skip-tags docker ...
+exit
+ssh ubuntu@192.168.1.20
+cd homelab-platform
+
+ansible-playbook -i "localhost," ansible/infra-runner.yml \
+  --ask-become-pass \
+  -e "ansible_connection=local" \
+  -e "ansible_user=ubuntu" \
+  -e "runner_label=self-hosted-infra" \
+  -e "github_actions_runner_url=https://github.com/BlakeHastings/homelab-platform" \
+  -e "github_actions_runner_token=<YOUR_FRESH_TOKEN>" \
+  --skip-tags docker
 ```
 
 ### Step 4 — Verify
