@@ -18,3 +18,8 @@ observability_server_ip: ""
 # Terraform binary version (used by infra-runner.yml)
 # Check latest at https://releases.hashicorp.com/terraform/
 terraform_version: "1.9.8"
+
+# GitHub Actions runner (used by infra-runner.yml)
+# Check latest at https://github.com/actions/runner/releases
+github_actions_runner_version: "2.323.0"
+github_actions_runner_dir: "/home/ubuntu/actions-runner"

@@ -161,23 +161,29 @@ In GitHub: your repo → Settings → Actions → Runners → New self-hosted ru
 
 ### Step 3 — Run the bootstrap playbook
 
-Clone `homelab-platform` to your dev machine, then from the repo root:
+SSH into the VM, clone the repo, and run the playbook locally:
 
 ```bash
-ansible-playbook -i "192.168.1.20," ansible/infra-runner.yml \
-  --private-key ~/.ssh/homelab-deploy \
+ssh ubuntu@192.168.1.20
+
+# On the VM:
+sudo apt install -y ansible git
+git clone https://github.com/BlakeHastings/homelab-platform.git
+cd homelab-platform
+
+ansible-playbook -i "localhost," ansible/infra-runner.yml \
   --ask-become-pass \
+  -e "ansible_connection=local" \
   -e "ansible_user=ubuntu" \
-  -e "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
   -e "runner_label=self-hosted-infra" \
   -e "github_actions_runner_url=https://github.com/BlakeHastings/homelab-platform" \
   -e "github_actions_runner_token=<YOUR_FRESH_TOKEN>"
 ```
 
-After the `docker` phase completes, you may need to reconnect for the docker group to take effect:
+After the `docker` phase completes, you may need to log out and back in for the docker group to take effect:
 ```bash
 # Re-run skipping docker phase if you hit docker permission errors
-ansible-playbook ... --skip-tags docker
+ansible-playbook -i "localhost," ansible/infra-runner.yml --skip-tags docker ...
 ```
 
 ### Step 4 — Verify
