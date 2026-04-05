@@ -35,12 +35,12 @@ resource "proxmox_virtual_environment_vm" "vm" {
     dedicated = var.memory_mb
   }
 
-  # Resize the cloned disk to var.disk_gb.
-  # The template's disk must be smaller than or equal to this size.
+  # Always clone at template size (30GB). Disk is resized post-creation
+  # via the null_resource below to avoid the bpg provider resize-during-clone bug.
   disk {
     datastore_id = var.datastore_id
     interface    = "scsi0"
-    size         = var.disk_gb
+    size         = 30
   }
 
   # Fixed MAC address — set a DHCP reservation for this MAC in your router
@@ -77,4 +77,28 @@ resource "proxmox_virtual_environment_vm" "vm" {
   started = true
 
   depends_on = [proxmox_virtual_environment_file.cloud_init]
+}
+
+# Resize the disk to var.disk_gb after the VM is created.
+# Done via the Proxmox API rather than in the disk block above, which
+# triggers a provider bug when resizing during clone.
+# cloud-init's growpart runs on first boot and expands the partition automatically.
+resource "terraform_data" "disk_resize" {
+  count = var.disk_gb > 30 ? 1 : 0
+
+  triggers_replace = {
+    vm_id   = proxmox_virtual_environment_vm.vm.vm_id
+    disk_gb = var.disk_gb
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      curl -k -s -X PUT \
+        -H "Authorization: PVEAPIToken=$PROXMOX_VE_API_TOKEN" \
+        -d "disk=scsi0&size=${var.disk_gb}G" \
+        "$PROXMOX_VE_ENDPOINT/api2/json/nodes/${var.target_node}/qemu/${proxmox_virtual_environment_vm.vm.vm_id}/resize"
+    EOT
+  }
+
+  depends_on = [proxmox_virtual_environment_vm.vm]
 }

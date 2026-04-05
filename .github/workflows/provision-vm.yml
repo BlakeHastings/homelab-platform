@@ -30,10 +30,10 @@ on:
         type: number
         default: 4096
       disk_gb:
-        description: "Root disk size in GB (must match template disk size — 30GB for the default VMID 9000 template)"
+        description: "Root disk size in GB (minimum 30 — must be >= template disk size)"
         required: false
         type: number
-        default: 30
+        default: 40
       terraform_working_dir:
         description: "Path to the Terraform config directory, relative to repo root (e.g., services/dns/terraform)"
         required: true
