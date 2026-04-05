@@ -1,0 +1,73 @@
+---
+# Infisical Deployment Playbook
+#
+# Deploys self-hosted Infisical (secrets manager) via Docker Compose.
+# Runs after base-vm.yml has already installed Docker on the VM.
+#
+# Secrets (.env) are generated on first run and never overwritten,
+# so re-running this playbook is safe.
+#
+# After deployment, open http://<VM_IP> to complete the setup wizard:
+#   1. Create your admin account
+#   2. Create a project (e.g., "homelab")
+#   3. Add all homelab secrets to the project
+#   4. Create a machine identity for the terraform-runner
+#      (Organization > Access Control > Machine Identities)
+
+- name: Deploy Infisical
+  hosts: all
+  vars:
+    infisical_dir: "/home/ubuntu/infisical"
+    infisical_url: "http://{{ inventory_hostname }}"
+
+  tasks:
+
+    - name: "[infisical] Create compose directory"
+      file:
+        path: "{{ infisical_dir }}"
+        state: directory
+        mode: "0750"
+
+    - name: "[infisical] Check if .env already exists"
+      stat:
+        path: "{{ infisical_dir }}/.env"
+      register: infisical_env
+
+    - name: "[infisical] Generate secrets and write .env"
+      shell: |
+        cat > {{ infisical_dir }}/.env <<EOF
+        POSTGRES_PASSWORD=$(openssl rand -hex 32)
+        ENCRYPTION_KEY=$(openssl rand -hex 16)
+        AUTH_SECRET=$(openssl rand -base64 32 | tr -d '\n=')
+        SITE_URL={{ infisical_url }}
+        EOF
+      when: not infisical_env.stat.exists
+
+    - name: "[infisical] Set .env permissions"
+      file:
+        path: "{{ infisical_dir }}/.env"
+        mode: "0600"
+
+    - name: "[infisical] Render docker-compose.yml"
+      template:
+        src: templates/infisical-compose.j2
+        dest: "{{ infisical_dir }}/docker-compose.yml"
+        mode: "0640"
+
+    - name: "[infisical] Pull latest images"
+      community.docker.docker_compose_v2_pull:
+        project_src: "{{ infisical_dir }}"
+
+    - name: "[infisical] Start services"
+      community.docker.docker_compose_v2:
+        project_src: "{{ infisical_dir }}"
+        state: present
+
+    - name: "[infisical] Wait for Infisical to be reachable"
+      uri:
+        url: "http://localhost/api/status"
+        status_code: 200
+      register: infisical_health
+      retries: 18
+      delay: 10
+      until: infisical_health.status == 200

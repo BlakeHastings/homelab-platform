@@ -1,0 +1,70 @@
+# Provision Infisical VM
+#
+# Provisions the infisical-vm on Proxmox and deploys self-hosted Infisical.
+# Infisical is platform infrastructure — it provides centralized secret storage
+# for all provisioning workflows across all projects.
+#
+# Run once. Re-running is safe (idempotent).
+#
+# After this workflow completes:
+#   1. Open http://<VM_IP> and complete the Infisical setup wizard
+#   2. Create a project and add all homelab secrets
+#   3. Create a machine identity token for the terraform-runner
+#      (Organization → Access Control → Machine Identities)
+
+name: Provision Infisical
+
+on:
+  workflow_dispatch:
+
+jobs:
+  provision:
+    uses: BlakeHastings/homelab-platform/.github/workflows/provision-vm.yml@main
+    with:
+      vm_name: "infisical-vm"
+      cpu_cores: 2
+      memory_mb: 4096
+      disk_gb: 40
+      terraform_working_dir: "terraform/nodes/infisical-vm"
+      observability_server_ip: ""
+    secrets:
+      PROXMOX_VE_ENDPOINT:     ${{ secrets.PROXMOX_VE_ENDPOINT }}
+      PROXMOX_VE_API_TOKEN:    ${{ secrets.PROXMOX_VE_API_TOKEN }}
+      PROXMOX_VE_SSH_USERNAME: ${{ secrets.PROXMOX_VE_SSH_USERNAME }}
+      PROXMOX_VE_SSH_PASSWORD: ${{ secrets.PROXMOX_VE_SSH_PASSWORD }}
+      ANSIBLE_PRIVATE_KEY:     ${{ secrets.ANSIBLE_PRIVATE_KEY }}
+      TF_VAR_PROXMOX_NODE:     ${{ secrets.TF_VAR_PROXMOX_NODE }}
+      TF_VAR_TEMPLATE_ID:      ${{ secrets.TF_VAR_TEMPLATE_ID }}
+      TF_VAR_GATEWAY:          ${{ secrets.TF_VAR_GATEWAY }}
+      TF_VAR_SSH_PUBLIC_KEY:   ${{ secrets.TF_VAR_SSH_PUBLIC_KEY }}
+
+  deploy:
+    name: "Deploy Infisical"
+    needs: provision
+    runs-on: [self-hosted, self-hosted-infra]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Write SSH private key
+        run: |
+          mkdir -p "$HOME/.ssh"
+          echo "${{ secrets.ANSIBLE_PRIVATE_KEY }}" > "$HOME/.ssh/deploy_key"
+          chmod 600 "$HOME/.ssh/deploy_key"
+
+      - name: Run Ansible
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          ansible-playbook \
+            -i "${{ needs.provision.outputs.vm_ip }}," \
+            ansible/infisical.yml \
+            -e "ansible_user=ubuntu" \
+            -e "ansible_ssh_private_key_file=$HOME/.ssh/deploy_key" \
+            -e "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
+            -e "infisical_url=http://${{ needs.provision.outputs.vm_ip }}"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$HOME/.ssh/deploy_key"

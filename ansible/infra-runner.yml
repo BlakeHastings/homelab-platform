@@ -339,3 +339,34 @@
           - "/var/run/docker.sock:/var/run/docker.sock"
         command: "run /etc/alloy/config.alloy"
       tags: alloy
+
+    # =========================================================================
+    # PHASE 8 — Infisical CLI (secret injection for provisioning workflows)
+    # =========================================================================
+
+    - name: "[infisical-cli] Add Infisical apt repository"
+      shell: |
+        curl -1sLf 'https://dl.cloudsmith.io/public/infisical/infisical-cli/setup.deb.sh' | sudo bash
+      args:
+        creates: /etc/apt/sources.list.d/infisical-infisical-cli.list
+      become: true
+      tags: infisical-cli
+
+    - name: "[infisical-cli] Install Infisical CLI"
+      apt:
+        name: infisical
+        state: present
+        update_cache: true
+      become: true
+      tags: infisical-cli
+
+    - name: "[infisical-cli] Verify Infisical CLI version"
+      command: infisical --version
+      register: infisical_ver
+      changed_when: false
+      tags: infisical-cli
+
+    - name: "[infisical-cli] Show Infisical CLI version"
+      debug:
+        msg: "{{ infisical_ver.stdout }}"
+      tags: infisical-cli
