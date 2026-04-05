@@ -6,8 +6,10 @@
 #
 # Run once. Re-running is safe (idempotent).
 #
+# vm_ip must match the DHCP reservation you set for MAC BC:24:11:00:01:01.
+#
 # After this workflow completes:
-#   1. Open http://<VM_IP> and complete the Infisical setup wizard
+#   1. Open http://<vm_ip> and complete the Infisical setup wizard
 #   2. Create a project and add all homelab secrets
 #   3. Create a machine identity token for the terraform-runner
 #      (Organization → Access Control → Machine Identities)
@@ -16,6 +18,11 @@ name: Provision Infisical
 
 on:
   workflow_dispatch:
+    inputs:
+      vm_ip:
+        description: "IP address of the infisical-vm (must match DHCP reservation for MAC BC:24:11:00:01:01)"
+        required: true
+        type: string
 
 jobs:
   provision:
@@ -58,12 +65,12 @@ jobs:
           ANSIBLE_HOST_KEY_CHECKING: "False"
         run: |
           ansible-playbook \
-            -i "${{ needs.provision.outputs.vm_ip }}," \
+            -i "${{ inputs.vm_ip }}," \
             ansible/infisical.yml \
             -e "ansible_user=ubuntu" \
             -e "ansible_ssh_private_key_file=$HOME/.ssh/deploy_key" \
             -e "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
-            -e "infisical_url=http://${{ needs.provision.outputs.vm_ip }}"
+            -e "infisical_url=http://${{ inputs.vm_ip }}"
 
       - name: Cleanup SSH key
         if: always()
