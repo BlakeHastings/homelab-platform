@@ -32,5 +32,5 @@ variable "memory_mb" {
 
 variable "disk_gb" {
   type    = number
-  default = 40
+  default = 30
 }

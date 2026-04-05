@@ -32,9 +32,9 @@ variable "memory_mb" {
 }
 
 variable "disk_gb" {
-  description = "Root disk size in GB"
+  description = "Root disk size in GB. Must match the template disk size (30GB for VMID 9000) — the bpg/proxmox provider cannot resize disks during clone."
   type        = number
-  default     = 20
+  default     = 30
 }
 
 variable "datastore_id" {
