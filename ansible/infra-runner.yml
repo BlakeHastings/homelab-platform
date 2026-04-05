@@ -208,8 +208,34 @@
         creates: "{{ github_actions_runner_dir }}/config.sh"
       tags: runner
 
+    - name: "[runner] Stop existing runner service if present"
+      shell: ./svc.sh stop
+      args:
+        chdir: "{{ github_actions_runner_dir }}"
+      become: true
+      register: runner_stop
+      failed_when: >
+        runner_stop.rc != 0 and
+        'not installed' not in runner_stop.stdout | lower and
+        'not installed' not in runner_stop.stderr | lower
+      changed_when: runner_stop.rc == 0
+      tags: runner
+
+    - name: "[runner] Uninstall existing runner service if present"
+      shell: ./svc.sh uninstall
+      args:
+        chdir: "{{ github_actions_runner_dir }}"
+      become: true
+      register: runner_uninstall
+      failed_when: >
+        runner_uninstall.rc != 0 and
+        'not installed' not in runner_uninstall.stdout | lower and
+        'not installed' not in runner_uninstall.stderr | lower
+      changed_when: runner_uninstall.rc == 0
+      tags: runner
+
     - name: "[runner] Remove existing runner config if present"
-      shell: ./config.sh remove --unattended --token {{ github_actions_runner_token }}
+      shell: ./config.sh remove --token {{ github_actions_runner_token }}
       args:
         chdir: "{{ github_actions_runner_dir }}"
       register: runner_remove
