@@ -13,7 +13,7 @@ module "vm" {
   source = "github.com/BlakeHastings/homelab-platform//terraform/modules/proxmox-vm?ref=main"
 
   vm_name        = "infisical-vm"
-  vm_id          = 101
+  vm_id          = 119
   target_node    = var.proxmox_node
   template_id    = var.template_id
   cpu_cores      = var.cpu_cores
