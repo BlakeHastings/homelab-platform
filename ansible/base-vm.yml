@@ -26,6 +26,23 @@
   tasks:
 
     # =========================================================================
+    # PHASE 0 — Wait for system readiness
+    # =========================================================================
+
+    - name: "[pre] Wait for cloud-init to complete"
+      command: cloud-init status --wait
+      become: true
+      changed_when: false
+
+    - name: "[pre] Wait for apt lock to be released"
+      shell: |
+        while fuser /var/lib/apt/lists/lock /var/lib/dpkg/lock-frontend /var/cache/apt/archives/lock >/dev/null 2>&1; do
+          sleep 5
+        done
+      changed_when: false
+      timeout: 300
+
+    # =========================================================================
     # PHASE 1 — Docker
     # =========================================================================
 
