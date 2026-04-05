@@ -1,0 +1,68 @@
+# Register Runner Workflow
+#
+# Registers the terraform-runner VM as a GitHub Actions runner for any repo.
+# Runs on the terraform-runner itself (self-hosted-infra), so no SSH needed.
+#
+# Prerequisites:
+#   - GH_PAT secret with repo scope (used to generate a registration token)
+#
+# Usage:
+#   Actions → Register Runner → Run workflow → enter owner/repo
+
+name: Register Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_repo:
+        description: "Repository to register runner for (e.g. BlakeHastings/homelab-services)"
+        required: true
+        type: string
+      runner_label:
+        description: "Runner label (default: self-hosted-infra)"
+        required: false
+        default: "self-hosted-infra"
+        type: string
+
+jobs:
+  register:
+    name: "Register runner → ${{ inputs.target_repo }}"
+    runs-on: [self-hosted, self-hosted-infra]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Generate runner registration token
+        id: runner-token
+        run: |
+          TOKEN=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.GH_PAT }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ inputs.target_repo }}/actions/runners/registration-token" \
+            | jq -r '.token')
+          if [ "$TOKEN" = "null" ] || [ -z "$TOKEN" ]; then
+            echo "ERROR: Failed to generate registration token. Check GH_PAT has repo scope and the repo name is correct."
+            exit 1
+          fi
+          echo "::add-mask::$TOKEN"
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+
+      - name: Derive runner directory
+        id: runner-dir
+        run: |
+          REPO_NAME=$(echo "${{ inputs.target_repo }}" | cut -d'/' -f2)
+          echo "dir=/home/ubuntu/actions-runner-${REPO_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Run Ansible runner phase
+        env:
+          ANSIBLE_STDOUT_CALLBACK: yaml
+        run: |
+          ansible-playbook -i "localhost," ansible/infra-runner.yml \
+            -e "ansible_connection=local" \
+            -e "ansible_user=ubuntu" \
+            -e "runner_label=${{ inputs.runner_label }}" \
+            -e "github_actions_runner_url=https://github.com/${{ inputs.target_repo }}" \
+            -e "github_actions_runner_token=${{ steps.runner-token.outputs.token }}" \
+            -e "github_actions_runner_dir=${{ steps.runner-dir.outputs.dir }}" \
+            --tags runner
