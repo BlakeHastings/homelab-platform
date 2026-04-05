@@ -53,7 +53,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
   # Cloud-init: DHCP + injected SSH key + user-data snippet.
   # IP is assigned by your router's DHCP reservation for the MAC above.
   initialization {
-    datastore_id = "local"
+    datastore_id = "local-lvm"
 
     ip_config {
       ipv4 {
