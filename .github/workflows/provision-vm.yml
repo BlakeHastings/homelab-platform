@@ -4,11 +4,20 @@
 # Called from any project repo:
 #   uses: BlakeHastings/homelab-platform/.github/workflows/provision-vm.yml@main
 #
-# All jobs run on the terraform-runner VM (label: self-hosted-infra).
-# That VM has LAN access to Proxmox and stores Terraform state on its disk.
+# Secrets are pulled from self-hosted Infisical at job start using the official
+# Infisical/secrets-action with **GitHub OIDC** auth — no static credentials
+# are stored in any repo. The calling repo must:
 #
-# After provisioning, deployment is also handled from the terraform-runner
-# via SSH — service VMs are plain Docker hosts, not GitHub Actions runners.
+#   1. Have a machine identity in Infisical with OIDC auth configured,
+#      trust-bound to that repo (e.g. sub: repo:Owner/repo:ref:refs/heads/main).
+#   2. Pass `infisical_identity_id` and `infisical_project_slug` as inputs.
+#
+# Required Infisical layout for the project (env slug `prod`):
+#   /proxmox/     PROXMOX_VE_ENDPOINT, PROXMOX_VE_API_TOKEN,
+#                 PROXMOX_VE_SSH_USERNAME, PROXMOX_VE_SSH_PASSWORD
+#   /terraform/   TF_VAR_PROXMOX_NODE, TF_VAR_TEMPLATE_ID,
+#                 TF_VAR_GATEWAY, TF_VAR_SSH_PUBLIC_KEY
+#   /ansible/     ANSIBLE_PRIVATE_KEY
 
 name: Provision VM (reusable)
 
@@ -48,26 +57,19 @@ on:
         required: false
         type: boolean
         default: false
-
-    secrets:
-      PROXMOX_VE_ENDPOINT:
+      infisical_identity_id:
+        description: "Infisical machine-identity ID (UUID) configured for OIDC auth, trust-bound to the calling repo."
         required: true
-      PROXMOX_VE_API_TOKEN:
+        type: string
+      infisical_project_slug:
+        description: "Infisical project slug (URL-friendly name from project settings)."
         required: true
-      PROXMOX_VE_SSH_USERNAME:
-        required: true
-      PROXMOX_VE_SSH_PASSWORD:
-        required: true
-      ANSIBLE_PRIVATE_KEY:
-        required: true
-      TF_VAR_PROXMOX_NODE:
-        required: true
-      TF_VAR_TEMPLATE_ID:
+        type: string
+      infisical_domain:
+        description: "Infisical server URL."
         required: false
-      TF_VAR_GATEWAY:
-        required: true
-      TF_VAR_SSH_PUBLIC_KEY:
-        required: true
+        type: string
+        default: "http://192.168.0.161"
 
     outputs:
       vm_ip:
@@ -78,6 +80,9 @@ jobs:
   provision:
     name: "Provision ${{ inputs.vm_name }}"
     runs-on: [self-hosted, self-hosted-infra]
+    permissions:
+      id-token: write    # required for GitHub Actions OIDC token issuance
+      contents: read
     outputs:
       vm_ip: ${{ steps.tf-output.outputs.vm_ip }}
 
@@ -92,6 +97,39 @@ jobs:
           ref: main
           path: platform
 
+      - name: Load Proxmox secrets from Infisical
+        uses: Infisical/secrets-action@v1.0.16
+        with:
+          method: oidc
+          identity-id:    ${{ inputs.infisical_identity_id }}
+          project-slug:   ${{ inputs.infisical_project_slug }}
+          env-slug:       prod
+          secret-path:    /proxmox
+          domain:         ${{ inputs.infisical_domain }}
+          export-type:    env
+
+      - name: Load Terraform secrets from Infisical
+        uses: Infisical/secrets-action@v1.0.16
+        with:
+          method: oidc
+          identity-id:    ${{ inputs.infisical_identity_id }}
+          project-slug:   ${{ inputs.infisical_project_slug }}
+          env-slug:       prod
+          secret-path:    /terraform
+          domain:         ${{ inputs.infisical_domain }}
+          export-type:    env
+
+      - name: Load Ansible secrets from Infisical
+        uses: Infisical/secrets-action@v1.0.16
+        with:
+          method: oidc
+          identity-id:    ${{ inputs.infisical_identity_id }}
+          project-slug:   ${{ inputs.infisical_project_slug }}
+          env-slug:       prod
+          secret-path:    /ansible
+          domain:         ${{ inputs.infisical_domain }}
+          export-type:    env
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -99,43 +137,32 @@ jobs:
 
       - name: Terraform Init
         working-directory: ${{ inputs.terraform_working_dir }}
-        env:
-          PROXMOX_VE_ENDPOINT:     ${{ secrets.PROXMOX_VE_ENDPOINT }}
-          PROXMOX_VE_API_TOKEN:    ${{ secrets.PROXMOX_VE_API_TOKEN }}
-          PROXMOX_VE_SSH_USERNAME: ${{ secrets.PROXMOX_VE_SSH_USERNAME }}
-          PROXMOX_VE_SSH_PASSWORD: ${{ secrets.PROXMOX_VE_SSH_PASSWORD }}
         run: terraform init -input=false
 
       - name: Terraform Plan
         working-directory: ${{ inputs.terraform_working_dir }}
         env:
-          PROXMOX_VE_ENDPOINT:     ${{ secrets.PROXMOX_VE_ENDPOINT }}
-          PROXMOX_VE_API_TOKEN:    ${{ secrets.PROXMOX_VE_API_TOKEN }}
-          PROXMOX_VE_SSH_USERNAME: ${{ secrets.PROXMOX_VE_SSH_USERNAME }}
-          PROXMOX_VE_SSH_PASSWORD: ${{ secrets.PROXMOX_VE_SSH_PASSWORD }}
-          TF_VAR_proxmox_node:     ${{ secrets.TF_VAR_PROXMOX_NODE }}
-          TF_VAR_template_id:      ${{ secrets.TF_VAR_TEMPLATE_ID }}
-          TF_VAR_gateway:          ${{ secrets.TF_VAR_GATEWAY }}
-          TF_VAR_ssh_public_key:   ${{ secrets.TF_VAR_SSH_PUBLIC_KEY }}
-          TF_VAR_cpu_cores:        ${{ inputs.cpu_cores }}
-          TF_VAR_memory_mb:        ${{ inputs.memory_mb }}
-          TF_VAR_disk_gb:          ${{ inputs.disk_gb }}
+          # Bridge UPPERCASE secret names from Infisical to the lowercase
+          # variable names Terraform expects (TF_VAR_<lowercase>).
+          TF_VAR_proxmox_node:   ${{ env.TF_VAR_PROXMOX_NODE }}
+          TF_VAR_template_id:    ${{ env.TF_VAR_TEMPLATE_ID }}
+          TF_VAR_gateway:        ${{ env.TF_VAR_GATEWAY }}
+          TF_VAR_ssh_public_key: ${{ env.TF_VAR_SSH_PUBLIC_KEY }}
+          TF_VAR_cpu_cores:      ${{ inputs.cpu_cores }}
+          TF_VAR_memory_mb:      ${{ inputs.memory_mb }}
+          TF_VAR_disk_gb:        ${{ inputs.disk_gb }}
         run: terraform plan -input=false -no-color
 
       - name: Terraform Apply
         working-directory: ${{ inputs.terraform_working_dir }}
         env:
-          PROXMOX_VE_ENDPOINT:     ${{ secrets.PROXMOX_VE_ENDPOINT }}
-          PROXMOX_VE_API_TOKEN:    ${{ secrets.PROXMOX_VE_API_TOKEN }}
-          PROXMOX_VE_SSH_USERNAME: ${{ secrets.PROXMOX_VE_SSH_USERNAME }}
-          PROXMOX_VE_SSH_PASSWORD: ${{ secrets.PROXMOX_VE_SSH_PASSWORD }}
-          TF_VAR_proxmox_node:     ${{ secrets.TF_VAR_PROXMOX_NODE }}
-          TF_VAR_template_id:      ${{ secrets.TF_VAR_TEMPLATE_ID }}
-          TF_VAR_gateway:          ${{ secrets.TF_VAR_GATEWAY }}
-          TF_VAR_ssh_public_key:   ${{ secrets.TF_VAR_SSH_PUBLIC_KEY }}
-          TF_VAR_cpu_cores:        ${{ inputs.cpu_cores }}
-          TF_VAR_memory_mb:        ${{ inputs.memory_mb }}
-          TF_VAR_disk_gb:          ${{ inputs.disk_gb }}
+          TF_VAR_proxmox_node:   ${{ env.TF_VAR_PROXMOX_NODE }}
+          TF_VAR_template_id:    ${{ env.TF_VAR_TEMPLATE_ID }}
+          TF_VAR_gateway:        ${{ env.TF_VAR_GATEWAY }}
+          TF_VAR_ssh_public_key: ${{ env.TF_VAR_SSH_PUBLIC_KEY }}
+          TF_VAR_cpu_cores:      ${{ inputs.cpu_cores }}
+          TF_VAR_memory_mb:      ${{ inputs.memory_mb }}
+          TF_VAR_disk_gb:        ${{ inputs.disk_gb }}
         run: terraform apply -input=false -auto-approve -no-color
 
       - name: Get VM IP
@@ -146,7 +173,7 @@ jobs:
       - name: Write SSH private key
         run: |
           mkdir -p "$HOME/.ssh"
-          echo "${{ secrets.ANSIBLE_PRIVATE_KEY }}" > "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$ANSIBLE_PRIVATE_KEY" > "$HOME/.ssh/deploy_key"
           chmod 600 "$HOME/.ssh/deploy_key"
 
       - name: Wait for VM SSH to be reachable

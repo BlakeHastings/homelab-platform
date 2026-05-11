@@ -8,11 +8,15 @@
 #
 # vm_ip must match the DHCP reservation you set for MAC BC:24:11:00:01:01.
 #
-# After this workflow completes:
+# Secrets are pulled via Infisical/secrets-action with GitHub OIDC. The repo
+# must have variables INFISICAL_IDENTITY_ID and INFISICAL_PROJECT_SLUG set.
+#
+# After this workflow completes (on first install):
 #   1. Open http://<vm_ip> and complete the Infisical setup wizard
-#   2. Create a project and add all homelab secrets
-#   3. Create a machine identity token for the terraform-runner
-#      (Organization → Access Control → Machine Identities)
+#   2. Create a project and add all homelab secrets organized into
+#      /proxmox, /terraform, /ansible folders
+#   3. Create one machine identity per consuming repo, with OIDC auth
+#      trust-bound to that repo
 
 name: Provision Infisical
 
@@ -34,30 +38,36 @@ jobs:
       disk_gb: 40
       terraform_working_dir: "terraform/nodes/infisical-vm"
       observability_server_ip: ""
-    secrets:
-      PROXMOX_VE_ENDPOINT:     ${{ secrets.PROXMOX_VE_ENDPOINT }}
-      PROXMOX_VE_API_TOKEN:    ${{ secrets.PROXMOX_VE_API_TOKEN }}
-      PROXMOX_VE_SSH_USERNAME: ${{ secrets.PROXMOX_VE_SSH_USERNAME }}
-      PROXMOX_VE_SSH_PASSWORD: ${{ secrets.PROXMOX_VE_SSH_PASSWORD }}
-      ANSIBLE_PRIVATE_KEY:     ${{ secrets.ANSIBLE_PRIVATE_KEY }}
-      TF_VAR_PROXMOX_NODE:     ${{ secrets.TF_VAR_PROXMOX_NODE }}
-      TF_VAR_TEMPLATE_ID:      ${{ secrets.TF_VAR_TEMPLATE_ID }}
-      TF_VAR_GATEWAY:          ${{ secrets.TF_VAR_GATEWAY }}
-      TF_VAR_SSH_PUBLIC_KEY:   ${{ secrets.TF_VAR_SSH_PUBLIC_KEY }}
+      infisical_identity_id:  ${{ vars.INFISICAL_IDENTITY_ID }}
+      infisical_project_slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
 
   deploy:
     name: "Deploy Infisical"
     needs: provision
     runs-on: [self-hosted, self-hosted-infra]
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Load Ansible secrets from Infisical
+        uses: Infisical/secrets-action@v1.0.16
+        with:
+          method: oidc
+          identity-id:    ${{ vars.INFISICAL_IDENTITY_ID }}
+          project-slug:   ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug:       prod
+          secret-path:    /ansible
+          domain:         ${{ vars.INFISICAL_DOMAIN || 'http://192.168.0.161' }}
+          export-type:    env
+
       - name: Write SSH private key
         run: |
           mkdir -p "$HOME/.ssh"
-          echo "${{ secrets.ANSIBLE_PRIVATE_KEY }}" > "$HOME/.ssh/deploy_key"
+          printf '%s\n' "$ANSIBLE_PRIVATE_KEY" > "$HOME/.ssh/deploy_key"
           chmod 600 "$HOME/.ssh/deploy_key"
 
       - name: Run Ansible
