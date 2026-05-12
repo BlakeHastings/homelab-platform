@@ -195,13 +195,17 @@ jobs:
       - name: Run Ansible
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
+          ANSIBLE_SSH_ENABLE_SSH_AGENT: "true"
         run: |
-          # ansible-core 2.18+ requires an ssh-agent when private_key_file is
-          # set, otherwise it errors out with "SSH_AGENT disabled" instead of
-          # falling back to passing -i to ssh. Start an ephemeral agent for
-          # this job and load the deploy key.
+          # Diagnostics first so we know exactly what ansible we're calling
+          which ansible-playbook
+          ansible --version
+          # ansible-core's ssh connection plugin requires SSH_AUTH_SOCK to be
+          # set when private_key_file is used. Start an ephemeral agent and
+          # load the deploy key.
           eval "$(ssh-agent -s)"
           ssh-add "$HOME/.ssh/deploy_key"
+          ssh-add -l
           trap 'ssh-agent -k >/dev/null 2>&1 || true' EXIT
 
           VM_IP="${{ steps.tf-output.outputs.vm_ip }}"
