@@ -195,21 +195,17 @@ jobs:
       - name: Run Ansible
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
+          # ansible-core 2.20's ssh_agent option defaults to "none" — that's
+          # what triggers "SSH_AGENT disabled" when a private key is in play.
+          # "auto" tells ansible to spin up its own ssh-agent for the run.
+          ANSIBLE_SSH_AGENT: "auto"
         run: |
-          # ansible-core 2.20 changed SSH handling: passing private_key_file
-          # forces an internal ssh-agent codepath that errors with
-          # "SSH_AGENT disabled" even when SSH_AUTH_SOCK is set. Instead,
-          # start a system ssh-agent, load the key, and let native ssh
-          # pick it up from SSH_AUTH_SOCK transparently.
-          eval "$(ssh-agent -s)"
-          ssh-add "$HOME/.ssh/deploy_key"
-          trap 'ssh-agent -k >/dev/null 2>&1 || true' EXIT
-
           VM_IP="${{ steps.tf-output.outputs.vm_ip }}"
           ansible-playbook \
             -i "$VM_IP," \
             platform/ansible/base-vm.yml \
             -e "ansible_user=ubuntu" \
+            -e "ansible_ssh_private_key_file=$HOME/.ssh/deploy_key" \
             -e "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
             -e "observability_server_ip=${{ inputs.observability_server_ip }}" \
             -e "install_portainer_server=${{ inputs.install_portainer_server }}"
