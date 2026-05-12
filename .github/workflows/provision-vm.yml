@@ -196,6 +196,14 @@ jobs:
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
         run: |
+          # ansible-core 2.18+ requires an ssh-agent when private_key_file is
+          # set, otherwise it errors out with "SSH_AGENT disabled" instead of
+          # falling back to passing -i to ssh. Start an ephemeral agent for
+          # this job and load the deploy key.
+          eval "$(ssh-agent -s)"
+          ssh-add "$HOME/.ssh/deploy_key"
+          trap 'ssh-agent -k >/dev/null 2>&1 || true' EXIT
+
           VM_IP="${{ steps.tf-output.outputs.vm_ip }}"
           ansible-playbook \
             -i "$VM_IP," \
