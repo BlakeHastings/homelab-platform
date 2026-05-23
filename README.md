@@ -12,6 +12,7 @@ For deployed services (observability, DNS, etc.) see [homelab-services](https://
 |------|-----------|
 | `.github/workflows/provision-vm.yml` | Reusable workflow: Terraform + Ansible for any VM |
 | `terraform/modules/proxmox-vm/` | Generic Proxmox VM module (cloud-init, DHCP via MAC) |
+| `terraform/modules/dns-record/` | Single Technitium A record — compose with `proxmox-vm` to register VMs in DNS |
 | `ansible/base-vm.yml` | Configures any service VM: Docker, runner, Node Exporter, Alloy |
 | `ansible/infra-runner.yml` | Configures the terraform-runner VM itself |
 | `ansible/vars/main.yml` | Platform defaults |
@@ -20,6 +21,7 @@ For deployed services (observability, DNS, etc.) see [homelab-services](https://
 | `docs/patterns/runner-tiers.md` | The infra/service runner tier model |
 | `docs/nodes/terraform-runner/` | How to bootstrap the infra runner |
 | `docs/examples/new-node/` | Complete working example for a new VM node |
+| `docs/examples/new-vm-with-dns/` | Same, but also registers a `<name>.lan` A record |
 | `docs/troubleshooting/` | Common Proxmox provisioning and Ansible gotchas |
 | `docs/decisions/` | Architecture decision records |
 | `docs/observability/` | How observability agents work on every node |

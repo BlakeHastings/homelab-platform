@@ -18,6 +18,8 @@
 #   /terraform/   TF_VAR_PROXMOX_NODE, TF_VAR_TEMPLATE_ID,
 #                 TF_VAR_GATEWAY, TF_VAR_SSH_PUBLIC_KEY
 #   /ansible/     ANSIBLE_PRIVATE_KEY
+#   /technitium/  TECHNITIUM_HOST, TECHNITIUM_TOKEN
+#                 (only required when create_dns_record: true)
 
 name: Provision VM (reusable)
 
@@ -70,6 +72,11 @@ on:
         required: false
         type: string
         default: "http://192.168.0.161"
+      create_dns_record:
+        description: "Also load Technitium creds from Infisical (/technitium/) and expose them to Terraform. Set true if the caller's Terraform root uses the dns-record module from this repo."
+        required: false
+        type: boolean
+        default: false
 
     outputs:
       vm_ip:
@@ -130,6 +137,22 @@ jobs:
           domain:         ${{ inputs.infisical_domain }}
           export-type:    env
 
+      # Opt-in: only loaded when the caller's TF root uses the dns-record module.
+      # When create_dns_record=false (default) this step is skipped and the
+      # TF_VAR_technitium_* env vars below stay empty — Terraform ignores
+      # unused TF_VAR_* inputs, so non-DNS callers see no behaviour change.
+      - name: Load Technitium secrets from Infisical
+        if: ${{ inputs.create_dns_record }}
+        uses: Infisical/secrets-action@v1.0.16
+        with:
+          method: oidc
+          identity-id:    ${{ inputs.infisical_identity_id }}
+          project-slug:   ${{ inputs.infisical_project_slug }}
+          env-slug:       prod
+          secret-path:    /technitium
+          domain:         ${{ inputs.infisical_domain }}
+          export-type:    env
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -151,6 +174,9 @@ jobs:
           TF_VAR_cpu_cores:      ${{ inputs.cpu_cores }}
           TF_VAR_memory_mb:      ${{ inputs.memory_mb }}
           TF_VAR_disk_gb:        ${{ inputs.disk_gb }}
+          # Empty when create_dns_record=false; ignored by TF roots that don't declare these vars.
+          TF_VAR_technitium_host:  ${{ env.TECHNITIUM_HOST }}
+          TF_VAR_technitium_token: ${{ env.TECHNITIUM_TOKEN }}
         run: terraform plan -input=false -no-color
 
       - name: Terraform Apply
@@ -163,6 +189,9 @@ jobs:
           TF_VAR_cpu_cores:      ${{ inputs.cpu_cores }}
           TF_VAR_memory_mb:      ${{ inputs.memory_mb }}
           TF_VAR_disk_gb:        ${{ inputs.disk_gb }}
+          # Empty when create_dns_record=false; ignored by TF roots that don't declare these vars.
+          TF_VAR_technitium_host:  ${{ env.TECHNITIUM_HOST }}
+          TF_VAR_technitium_token: ${{ env.TECHNITIUM_TOKEN }}
         run: terraform apply -input=false -auto-approve -no-color
 
       - name: Get VM IP
