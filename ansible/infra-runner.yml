@@ -208,11 +208,22 @@
         creates: "{{ github_actions_runner_dir }}/config.sh"
       tags: runner
 
+    # svc.sh is only created by `./svc.sh install` (after `./config.sh`), so
+    # on a brand-new runner directory it doesn't exist yet. Stat-check first
+    # and skip stop/uninstall if the script is absent — otherwise the shell
+    # exits 127 with `./svc.sh: not found` and breaks the play.
+    - name: "[runner] Check whether runner service script exists"
+      stat:
+        path: "{{ github_actions_runner_dir }}/svc.sh"
+      register: runner_svc_script
+      tags: runner
+
     - name: "[runner] Stop existing runner service if present"
       shell: ./svc.sh stop
       args:
         chdir: "{{ github_actions_runner_dir }}"
       become: true
+      when: runner_svc_script.stat.exists
       register: runner_stop
       failed_when: >
         runner_stop.rc != 0 and
@@ -226,6 +237,7 @@
       args:
         chdir: "{{ github_actions_runner_dir }}"
       become: true
+      when: runner_svc_script.stat.exists
       register: runner_uninstall
       failed_when: >
         runner_uninstall.rc != 0 and
