@@ -1,0 +1,39 @@
+# Example: Provision my-vm and register my-vm.lan in one shot.
+#
+# Copy this to your project repo as .github/workflows/provision-my-vm.yml
+# and update the REPLACE values.
+#
+# Prerequisites:
+#   1. Proxmox Ubuntu 24.04 template exists (VMID 9000)
+#   2. terraform-runner VM bootstrapped (see homelab-platform docs)
+#   3. The "lan" zone exists in Technitium (provisioned once by
+#      homelab-services/services/dns/terraform-config/)
+#   4. This repo has GitHub Actions Variables INFISICAL_IDENTITY_ID and
+#      INFISICAL_PROJECT_SLUG set
+#   5. The Infisical machine identity for this repo has read on
+#      /proxmox/, /terraform/, /ansible/, AND /technitium/
+#
+# Trigger manually: Actions → Provision my-vm → Run workflow
+
+name: Provision my-vm    # REPLACE
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write    # OIDC for Infisical auth
+  contents: read
+
+jobs:
+  provision:
+    uses: BlakeHastings/homelab-platform/.github/workflows/provision-vm.yml@main
+    with:
+      vm_name:               "my-vm"                              # REPLACE
+      cpu_cores:             2                                    # REPLACE if needed
+      memory_mb:             4096                                 # REPLACE if needed
+      disk_gb:               40                                   # REPLACE if needed
+      terraform_working_dir: "terraform/nodes/my-vm"              # REPLACE
+      observability_server_ip: "192.168.0.251"
+      create_dns_record:     true                                 # ← enables /technitium load
+      infisical_identity_id:  ${{ vars.INFISICAL_IDENTITY_ID }}
+      infisical_project_slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
