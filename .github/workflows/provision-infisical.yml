@@ -41,7 +41,7 @@ jobs:
       memory_mb: 4096
       disk_gb: 40
       terraform_working_dir: "terraform/nodes/infisical-vm"
-      observability_server_ip: ""
+      observability_server_ip: "observability-vm.lan"   # Alloy ships container logs + journal here
       infisical_identity_id:  ${{ vars.INFISICAL_IDENTITY_ID }}
       infisical_project_slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
 
