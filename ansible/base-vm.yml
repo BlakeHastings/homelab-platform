@@ -141,6 +141,7 @@
         src: templates/alloy-config.j2
         dest: "{{ ansible_env.HOME }}/alloy/config.alloy"
         mode: "0640"
+      notify: restart alloy   # bind-mount file change doesn't auto-restart the container
       tags: alloy
 
     - name: "[alloy] Run Grafana Alloy container"
@@ -177,3 +178,16 @@
       loop_control:
         label: "{{ item.item }}"
       tags: alloy
+
+  # =========================================================================
+  # HANDLERS — fire at end of play if notified
+  # =========================================================================
+  handlers:
+    # Restart the Alloy container when its bind-mounted config file changes.
+    # docker_container's `restart: true` triggers a stop+start (not a recreate),
+    # which is enough — Alloy re-reads /etc/alloy/config.alloy on start.
+    - name: restart alloy
+      community.docker.docker_container:
+        name: alloy
+        state: started
+        restart: true
