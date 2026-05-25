@@ -236,6 +236,7 @@ jobs:
             -e "ansible_user=ubuntu" \
             -e "ansible_ssh_private_key_file=$HOME/.ssh/deploy_key" \
             -e "ansible_ssh_common_args='-o StrictHostKeyChecking=no'" \
+            -e "vm_name=${{ inputs.vm_name }}" \
             -e "observability_server_ip=${{ inputs.observability_server_ip }}" \
             -e "install_portainer_server=${{ inputs.install_portainer_server }}"
 

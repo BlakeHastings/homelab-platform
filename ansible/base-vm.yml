@@ -35,6 +35,28 @@
       changed_when: false
 
     # =========================================================================
+    # PHASE 0.1 — Hostname enforcement
+    # cloud-init usually sets the hostname from vm_name, but at least one
+    # VM in the fleet has drifted (searxng-gateway's hostname became
+    # "terraform-runner", presumably from a misdirected playbook run). That
+    # made the Alloy template render the wrong `node` label and silently
+    # mislabel logs in Loki. Enforce match here.
+    # =========================================================================
+
+    - name: "[hostname] Ensure system hostname matches vm_name"
+      ansible.builtin.hostname:
+        name: "{{ vm_name }}"
+      become: true
+      when: vm_name is defined and vm_name | length > 0
+      register: hostname_set
+      tags: hostname
+
+    - name: "[hostname] Re-gather facts if hostname changed"
+      setup:
+      when: hostname_set is defined and hostname_set.changed
+      tags: hostname
+
+    # =========================================================================
     # PHASE 0.5 — Resolver: route .lan queries to Technitium via systemd-resolved
     # Without this, Alloy can't resolve observability-vm.lan to push logs, and
     # workflows can't ssh to <vm>.lan names. dns-vm self-resolves via 127.0.0.1.

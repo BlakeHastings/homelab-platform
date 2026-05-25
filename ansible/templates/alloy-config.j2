@@ -15,7 +15,7 @@ loki.source.docker "container_logs" {
 
   labels = {
     job  = "docker",
-    node = "{{ ansible_hostname }}",
+    node = "{{ vm_name | default(ansible_hostname) }}",
   }
 }
 
@@ -25,7 +25,7 @@ loki.source.journal "system_journal" {
 
   labels = {
     job  = "systemd",
-    node = "{{ ansible_hostname }}",
+    node = "{{ vm_name | default(ansible_hostname) }}",
   }
 }
 
