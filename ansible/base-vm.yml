@@ -35,6 +35,31 @@
       changed_when: false
 
     # =========================================================================
+    # PHASE 0.5 — Resolver: route .lan queries to Technitium via systemd-resolved
+    # Without this, Alloy can't resolve observability-vm.lan to push logs, and
+    # workflows can't ssh to <vm>.lan names. dns-vm self-resolves via 127.0.0.1.
+    # =========================================================================
+
+    - name: "[dns-resolution] Ensure resolved.conf.d directory exists"
+      file:
+        path: /etc/systemd/resolved.conf.d
+        state: directory
+        mode: '0755'
+      become: true
+      tags: dns-resolution
+
+    - name: "[dns-resolution] Drop-in routing .lan queries to Technitium"
+      template:
+        src: templates/technitium-resolved.conf.j2
+        dest: /etc/systemd/resolved.conf.d/technitium.conf
+        mode: '0644'
+      become: true
+      notify:
+        - restart systemd-resolved
+        - restart alloy
+      tags: dns-resolution
+
+    # =========================================================================
     # PHASE 1 — Docker
     # =========================================================================
 
@@ -183,9 +208,16 @@
   # HANDLERS — fire at end of play if notified
   # =========================================================================
   handlers:
-    # Restart the Alloy container when its bind-mounted config file changes.
-    # docker_container's `restart: true` triggers a stop+start (not a recreate),
-    # which is enough — Alloy re-reads /etc/alloy/config.alloy on start.
+    - name: restart systemd-resolved
+      systemd:
+        name: systemd-resolved
+        state: restarted
+      become: true
+
+    # Restart the Alloy container when its bind-mounted config file changes
+    # OR when system DNS changes (Alloy caches resolutions at startup).
+    # docker_container's `restart: true` triggers a stop+start, which re-reads
+    # the config and re-resolves the configured Loki endpoint.
     - name: restart alloy
       community.docker.docker_container:
         name: alloy

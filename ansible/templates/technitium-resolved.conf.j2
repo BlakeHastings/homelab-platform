@@ -1,0 +1,10 @@
+# Rendered by ansible/base-vm.yml — DO NOT edit by hand on the host.
+#
+# systemd-resolved drop-in routing .lan queries to Technitium.
+# - On dns-vm (which IS Technitium) we point at 127.0.0.1 to avoid
+#   sending a self-query out the LAN interface.
+# - On every other VM we point at the dns-vm LAN address.
+
+[Resolve]
+DNS={{ '127.0.0.1' if ansible_hostname == 'dns-vm' else '192.168.0.250' }}
+Domains=~lan
