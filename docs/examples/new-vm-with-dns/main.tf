@@ -24,9 +24,17 @@ module "vm" {
 module "dns" {
   source = "github.com/BlakeHastings/homelab-platform//terraform/modules/dns-record?ref=main"
 
-  hostname = module.vm.vm_name      # → my-vm.lan
-  ip       = module.vm.vm_ip
+  # CNAME mode (preferred): creates my-friendly-name.lan → my-vm.lan.
+  # The underlying A record on my-vm.lan is auto-registered by the router
+  # via DHCP updates, so when the VM's IP changes the CNAME just follows.
+  # No re-apply needed when DHCP renews.
+  hostname = "my-friendly-name"                  # → my-friendly-name.lan
+  cname    = "${module.vm.vm_name}.lan"          # → my-vm.lan (router-registered)
   zone     = "lan"
+
+  # Alternative: A-record mode. Use only if you've pinned the IP via
+  # router DHCP reservation or the target has a truly static IP.
+  # ip       = module.vm.vm_ip
 }
 
 output "vm_ip" {
