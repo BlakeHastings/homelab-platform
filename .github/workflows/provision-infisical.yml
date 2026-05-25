@@ -77,6 +77,11 @@ jobs:
       - name: Run Ansible
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
+          # Ansible 2.16+ tries to add the private key to an ssh-agent; default
+          # ssh_agent="none" fails immediately with "Cannot utilize private_key
+          # with SSH_AGENT disabled". "auto" makes Ansible spawn an agent on
+          # demand. See homelab-bootstrap skill's "Ansible 2.16+ SSH_AGENT" note.
+          ANSIBLE_SSH_AGENT: "auto"
         run: |
           ansible-playbook \
             -i "${{ inputs.vm_ip }}," \
