@@ -195,15 +195,17 @@ jobs:
           TF_VAR_technitium_token: ${{ env.TECHNITIUM_TOKEN }}
         run: terraform apply -input=false -auto-approve -no-color
 
-      # Runs whenever any step after Init has failed — covers Apply failures (partial
-      # resource creation) and post-apply failures (SSH timeout, Ansible error).
+      # Fires only when Apply ran (outcome != skipped) and the job failed.
+      # This prevents rollback from triggering on Plan/Init failures, which
+      # would destroy existing live VMs that were merely being refreshed.
+      # Covers: Apply partial failure, SSH timeout, Ansible failure.
       # Two-leg strategy:
       #   1. terraform destroy removes everything tracked in state.
       #   2. Proxmox API delete removes the VM if it was cloned in Proxmox but the
       #      provider errored before writing it to state (the pool-check race that
       #      originally triggered this rollback system).
       - name: Rollback on failure
-        if: failure()
+        if: failure() && steps.apply.outcome != 'skipped'
         working-directory: ${{ inputs.terraform_working_dir }}
         env:
           TF_VAR_proxmox_node:   ${{ env.TF_VAR_PROXMOX_NODE }}
@@ -217,7 +219,10 @@ jobs:
           TF_VAR_technitium_token: ${{ env.TECHNITIUM_TOKEN }}
         run: |
           echo "=== Rollback: destroying Terraform-tracked resources ==="
-          terraform destroy -input=false -auto-approve -no-color || true
+          # -refresh=false: skip provider READ calls so a broken provider cannot
+          # block the destroy (e.g. the bpg/proxmox pool-check bug that fires on
+          # every Read). Resources are deleted based on what is recorded in state.
+          terraform destroy -input=false -auto-approve -no-color -refresh=false || true
 
           echo "=== Rollback: checking Proxmox for untracked VM '${{ inputs.vm_name }}' ==="
           NODE="$TF_VAR_proxmox_node"
