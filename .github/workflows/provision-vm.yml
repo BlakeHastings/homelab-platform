@@ -180,6 +180,7 @@ jobs:
         run: terraform plan -input=false -no-color
 
       - name: Terraform Apply
+        id: apply
         working-directory: ${{ inputs.terraform_working_dir }}
         env:
           TF_VAR_proxmox_node:   ${{ env.TF_VAR_PROXMOX_NODE }}
@@ -193,6 +194,61 @@ jobs:
           TF_VAR_technitium_host:  ${{ env.TECHNITIUM_HOST }}
           TF_VAR_technitium_token: ${{ env.TECHNITIUM_TOKEN }}
         run: terraform apply -input=false -auto-approve -no-color
+
+      # Runs whenever any step after Init has failed — covers Apply failures (partial
+      # resource creation) and post-apply failures (SSH timeout, Ansible error).
+      # Two-leg strategy:
+      #   1. terraform destroy removes everything tracked in state.
+      #   2. Proxmox API delete removes the VM if it was cloned in Proxmox but the
+      #      provider errored before writing it to state (the pool-check race that
+      #      originally triggered this rollback system).
+      - name: Rollback on failure
+        if: failure()
+        working-directory: ${{ inputs.terraform_working_dir }}
+        env:
+          TF_VAR_proxmox_node:   ${{ env.TF_VAR_PROXMOX_NODE }}
+          TF_VAR_template_id:    ${{ env.TF_VAR_TEMPLATE_ID }}
+          TF_VAR_gateway:        ${{ env.TF_VAR_GATEWAY }}
+          TF_VAR_ssh_public_key: ${{ env.TF_VAR_SSH_PUBLIC_KEY }}
+          TF_VAR_cpu_cores:      ${{ inputs.cpu_cores }}
+          TF_VAR_memory_mb:      ${{ inputs.memory_mb }}
+          TF_VAR_disk_gb:        ${{ inputs.disk_gb }}
+          TF_VAR_technitium_host:  ${{ env.TECHNITIUM_HOST }}
+          TF_VAR_technitium_token: ${{ env.TECHNITIUM_TOKEN }}
+        run: |
+          echo "=== Rollback: destroying Terraform-tracked resources ==="
+          terraform destroy -input=false -auto-approve -no-color || true
+
+          echo "=== Rollback: checking Proxmox for untracked VM '${{ inputs.vm_name }}' ==="
+          NODE="$TF_VAR_proxmox_node"
+          VMID=$(curl -k -sf \
+            -H "Authorization: PVEAPIToken=$PROXMOX_VE_API_TOKEN" \
+            "$PROXMOX_VE_ENDPOINT/api2/json/nodes/$NODE/qemu" \
+            | jq -r --arg name "${{ inputs.vm_name }}" \
+              '.data[] | select(.name == $name) | .vmid // empty' 2>/dev/null || true)
+
+          if [ -n "$VMID" ]; then
+            echo "Found orphaned VM '${{ inputs.vm_name }}' (VMID $VMID) — deleting..."
+            STATUS=$(curl -k -sf \
+              -H "Authorization: PVEAPIToken=$PROXMOX_VE_API_TOKEN" \
+              "$PROXMOX_VE_ENDPOINT/api2/json/nodes/$NODE/qemu/$VMID/status/current" \
+              | jq -r '.data.status // empty' 2>/dev/null || echo "")
+            if [ "$STATUS" = "running" ]; then
+              curl -k -s -X POST \
+                -H "Authorization: PVEAPIToken=$PROXMOX_VE_API_TOKEN" \
+                "$PROXMOX_VE_ENDPOINT/api2/json/nodes/$NODE/qemu/$VMID/status/stop" \
+                || true
+              echo "Stop requested, waiting 10 s..."
+              sleep 10
+            fi
+            curl -k -s -f -X DELETE \
+              -H "Authorization: PVEAPIToken=$PROXMOX_VE_API_TOKEN" \
+              "$PROXMOX_VE_ENDPOINT/api2/json/nodes/$NODE/qemu/$VMID?destroy-unreferenced-disks=1&purge=1" \
+              && echo "VM $VMID deleted." \
+              || echo "VM $VMID deletion failed. Manual cleanup may be needed."
+          else
+            echo "No orphaned VM found in Proxmox."
+          fi
 
       - name: Get VM IP
         id: tf-output
