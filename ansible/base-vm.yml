@@ -34,6 +34,15 @@
       become: true
       changed_when: false
 
+    - name: "[pre] Wait for apt locks to be released"
+      shell: |
+        while fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock >/dev/null 2>&1; do
+          sleep 5
+        done
+      become: true
+      changed_when: false
+      timeout: 600
+
     # =========================================================================
     # PHASE 0.1 — Hostname enforcement
     # cloud-init usually sets the hostname from vm_name, but at least one
