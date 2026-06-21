@@ -20,6 +20,10 @@ resource "proxmox_virtual_environment_vm" "vm" {
   name      = var.vm_name
   vm_id     = var.vm_id
   node_name = var.target_node
+  # Explicitly declare no pool so the provider skips pool-discovery reads,
+  # which call an API endpoint that Proxmox rejects with HTTP 400 when any
+  # pool (e.g. "centralware") sends back an unexpected schema response.
+  pool_id   = ""
 
   clone {
     vm_id = var.template_id
