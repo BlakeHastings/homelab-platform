@@ -65,3 +65,9 @@ variable "ssh_public_key" {
   type        = string
   sensitive   = true
 }
+
+variable "on_boot" {
+  description = "Start the VM automatically when the Proxmox node boots (survives a power cycle). Requires the physical host's BIOS to power on after AC loss for a full power-outage recovery."
+  type        = bool
+  default     = true
+}

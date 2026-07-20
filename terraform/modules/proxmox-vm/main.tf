@@ -79,6 +79,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
   }
 
   started = true
+  on_boot = var.on_boot
 
   depends_on = [proxmox_virtual_environment_file.cloud_init]
 }
