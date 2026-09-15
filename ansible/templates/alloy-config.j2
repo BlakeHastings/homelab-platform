@@ -19,12 +19,38 @@ loki.source.docker "container_logs" {
   }
 }
 
-// Collect systemd journal logs (system events, service logs)
+// Collect systemd journal logs (system events, service logs).
+//
+// Two things about this component are not what they look like, and between
+// them they cost the fleet every journal log it should have shipped between
+// the day Alloy was introduced and 2026-09-15.
+//
+// One: `job` below does nothing. loki.source.journal sets `job` to its own
+// component name, and that wins over anything in the labels block, so these
+// streams arrived in Loki as job="loki.source.journal.system_journal" rather
+// than job="systemd". A relabel rule is the documented way to set it, so the
+// label is forced here instead of asked for above.
+//
+// Two: reading the journal at all needs the host's /etc/machine-id mounted
+// into the container, which base-vm.yml does. sd-journal locates the journal
+// directory by machine ID, and the container's own ID does not match the
+// host's, so without that mount this component starts, reports no error, and
+// reads nothing for as long as it runs. Check the mount before believing a
+// silent journal source.
+loki.relabel "journal_job" {
+  forward_to = []
+
+  rule {
+    target_label = "job"
+    replacement  = "systemd"
+  }
+}
+
 loki.source.journal "system_journal" {
-  forward_to = [loki.write.central.receiver]
+  forward_to    = [loki.write.central.receiver]
+  relabel_rules = loki.relabel.journal_job.rules
 
   labels = {
-    job  = "systemd",
     node = "{{ vm_name | default(ansible_hostname) }}",
   }
 }
