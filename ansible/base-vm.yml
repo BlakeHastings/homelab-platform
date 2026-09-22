@@ -200,6 +200,29 @@
       notify: restart alloy   # bind-mount file change doesn't auto-restart the container
       tags: alloy
 
+    # The mount below is only worth anything if the host has a machine ID to
+    # mount. A cloud image can ship /etc/machine-id empty and leave it that way
+    # until something regenerates it, and an empty file mounts as cleanly as a
+    # full one: Alloy would start, read no journal, and report nothing. Fail
+    # here instead, where the message names the cause.
+    - name: "[alloy] Read the host machine ID"
+      slurp:
+        src: /etc/machine-id
+      become: true
+      register: machine_id
+      tags: alloy
+
+    - name: "[alloy] Refuse to continue with an empty machine ID"
+      assert:
+        that:
+          - (machine_id.content | b64decode | trim) | length > 0
+        fail_msg: >-
+          /etc/machine-id is empty on this host, so Alloy's journal source would
+          silently read nothing. Run `systemd-machine-id-setup` and reboot, then
+          re-run with --tags alloy.
+        success_msg: "machine ID present, journal source can find the journal"
+      tags: alloy
+
     - name: "[alloy] Run Grafana Alloy container"
       community.docker.docker_container:
         name: alloy
@@ -213,6 +236,10 @@
           - "{{ ansible_env.HOME }}/alloy/config.alloy:/etc/alloy/config.alloy"
           - "/var/log:/var/log:ro"
           - "/run/log/journal:/run/log/journal:ro"
+          # sd-journal finds the journal by machine ID, so without the host's
+          # own /etc/machine-id the journal source reads nothing and says
+          # nothing about it. See the comment in alloy-config.j2.
+          - "/etc/machine-id:/etc/machine-id:ro"
           - "/var/run/docker.sock:/var/run/docker.sock"
         command: "run /etc/alloy/config.alloy"
       tags: alloy
